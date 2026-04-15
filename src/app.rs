@@ -6,7 +6,11 @@ use ratatui::{
 };
 use tui_textarea::{Input, TextArea};
 
-use crate::config::{AppConfig, Profiles};
+use std::collections::BTreeMap;
+
+use crate::config::{AppConfig, Connection, Profiles};
+use crate::db::{self, Database};
+use crate::db::duckdb_backend::DuckDb;
 use crate::tree::TreeNode;
 use crate::vim::{self, Transition, Vim};
 
@@ -17,22 +21,37 @@ pub enum Focus {
     Results,
 }
 
+#[derive(PartialEq)]
+pub enum MessageLevel {
+    Info,
+    Error,
+}
+
+pub struct Message {
+    pub text: String,
+    pub level: MessageLevel,
+}
+
 pub struct App<'a> {
     pub sidebar_items: Vec<TreeNode>,
     pub sidebar_state: ListState,
     pub editor: TextArea<'a>,
     pub vim: Vim,
     pub results_visible: bool,
-    pub results_content: String,
+    pub query_result: Option<db::QueryResult>,
     pub focus: Focus,
     pub running: bool,
     pub sidebar_width: u16,
     pub connected_db: Option<String>,
+    pub message: Option<Message>,
+    pub profiles: Profiles,
+    pub connection: Option<Box<dyn Database>>,
+    label_to_profile: BTreeMap<String, String>,
 }
 
 impl<'a> App<'a> {
     pub fn new(config: AppConfig, profiles: Profiles) -> Self {
-        let sidebar_items = build_sidebar_tree(&profiles);
+        let (sidebar_items, label_to_profile) = build_sidebar_tree(&profiles);
 
         let mut state = ListState::default();
         if !sidebar_items.is_empty() {
@@ -50,23 +69,49 @@ impl<'a> App<'a> {
             editor,
             vim: Vim::new(vim::Mode::Normal),
             results_visible: false,
-            results_content: String::new(),
+            query_result: None,
             focus: Focus::Sidebar,
             running: true,
             sidebar_width: config.sidebar_width,
             connected_db: None,
+            message: None,
+            profiles,
+            connection: None,
+            label_to_profile,
         }
+    }
+
+    pub fn show_error(&mut self, text: impl Into<String>) {
+        self.message = Some(Message {
+            text: text.into(),
+            level: MessageLevel::Error,
+        });
+    }
+
+    pub fn show_info(&mut self, text: impl Into<String>) {
+        self.message = Some(Message {
+            text: text.into(),
+            level: MessageLevel::Info,
+        });
     }
 
     pub fn execute_query(&mut self) {
         let query: String = self.editor.lines().join("\n");
-        if !query.trim().is_empty() {
-            self.results_content = format!(
-                "Executed: {}\n\n(no database connected — results will appear here)",
-                query.trim()
-            );
-            self.results_visible = true;
-            self.focus = Focus::Results;
+        if query.trim().is_empty() {
+            return;
+        }
+        let Some(conn) = self.connection.as_mut() else {
+            self.show_error("No database connected");
+            return;
+        };
+        match conn.execute_query(query.trim()) {
+            Ok(result) => {
+                self.query_result = Some(result);
+                self.results_visible = true;
+                self.focus = Focus::Results;
+                self.refresh_schema();
+            }
+            Err(e) => self.show_error(format!("Query error: {e}")),
         }
     }
 
@@ -74,6 +119,16 @@ impl<'a> App<'a> {
         let event = event::read()?;
         if let Event::Key(key) = &event {
             if key.kind != KeyEventKind::Press {
+                return Ok(());
+            }
+
+            if self.message.is_some() {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
+                        self.message = None;
+                    }
+                    _ => {}
+                }
                 return Ok(());
             }
 
@@ -183,21 +238,51 @@ impl<'a> App<'a> {
         let label = node.label.clone();
 
         if self.connected_db.as_ref() == Some(&label) {
-            // Disconnect: collapse and clear
+            // Disconnect: drop connection, clear schema, collapse
+            self.connection = None;
             self.connected_db = None;
+            self.clear_schema(&label);
             TreeNode::collapse_at_index(&mut self.sidebar_items, flat_index);
         } else {
             // Collapse previously connected db
             if let Some(prev) = &self.connected_db {
+                self.connection = None;
+                let prev = prev.clone();
+                self.clear_schema(&prev);
                 for node in self.sidebar_items.iter_mut() {
-                    if node.label == *prev && node.expanded {
+                    if node.label == prev && node.expanded {
                         node.expanded = false;
                         break;
                     }
                 }
             }
-            // Connect and expand the new one — recompute flat index after collapse
-            self.connected_db = Some(label.clone());
+
+            // Look up profile and connect
+            let profile_key = self.label_to_profile.get(&label).cloned();
+            let profile = profile_key
+                .as_ref()
+                .and_then(|k| self.profiles.connections.get(k));
+
+            if let Some(profile) = profile {
+                match profile {
+                    Connection::DuckDb(cfg) => match DuckDb::connect(&cfg.path) {
+                        Ok(mut db) => {
+                            match db.schema_info() {
+                                Ok(schema) => self.populate_schema(&label, schema),
+                                Err(e) => self.show_error(format!("Schema error: {e}")),
+                            }
+                            self.connection = Some(Box::new(db));
+                            self.connected_db = Some(label.clone());
+                        }
+                        Err(e) => {
+                            self.show_error(format!("Connection failed: {e}"));
+                            return;
+                        }
+                    },
+                }
+            }
+
+            // Expand the connection node
             let new_flat = TreeNode::flatten_all(&self.sidebar_items);
             if let Some(new_idx) = new_flat.iter().position(|n| n.label == label) {
                 TreeNode::toggle_at_index(&mut self.sidebar_items, new_idx);
@@ -205,14 +290,57 @@ impl<'a> App<'a> {
             }
         }
     }
+
+    fn refresh_schema(&mut self) {
+        let Some(label) = self.connected_db.clone() else { return };
+        let Some(conn) = self.connection.as_mut() else { return };
+        match conn.schema_info() {
+            Ok(schema) => self.populate_schema(&label, schema),
+            Err(_) => {} // silent — don't interrupt the user's query result
+        }
+    }
+
+    fn populate_schema(&mut self, connection_label: &str, schema: db::SchemaInfo) {
+        for node in self.sidebar_items.iter_mut() {
+            if node.label == connection_label {
+                for child in node.children.iter_mut() {
+                    match child.label.as_str() {
+                        "Tables" => {
+                            child.children =
+                                schema.tables.iter().map(|t| TreeNode::leaf(t)).collect();
+                        }
+                        "Views" => {
+                            child.children =
+                                schema.views.iter().map(|v| TreeNode::leaf(v)).collect();
+                        }
+                        _ => {}
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    fn clear_schema(&mut self, connection_label: &str) {
+        for node in self.sidebar_items.iter_mut() {
+            if node.label == connection_label {
+                for child in node.children.iter_mut() {
+                    child.children.clear();
+                }
+                break;
+            }
+        }
+    }
 }
 
-fn build_sidebar_tree(profiles: &Profiles) -> Vec<TreeNode> {
-    profiles
+fn build_sidebar_tree(profiles: &Profiles) -> (Vec<TreeNode>, BTreeMap<String, String>) {
+    let mut label_map = BTreeMap::new();
+    let nodes = profiles
         .connections
         .iter()
         .map(|(name, conn)| {
             let label = format!("{} ({})", name, conn.type_name());
+            label_map.insert(label.clone(), name.clone());
             TreeNode::connection(
                 &label,
                 vec![
@@ -221,5 +349,7 @@ fn build_sidebar_tree(profiles: &Profiles) -> Vec<TreeNode> {
                 ],
             )
         })
-        .collect()
+        .collect();
+    (nodes, label_map)
 }
+

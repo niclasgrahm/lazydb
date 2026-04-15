@@ -1,4 +1,5 @@
 mod editor;
+mod message;
 mod results;
 mod sidebar;
 mod status_bar;
@@ -46,4 +47,6 @@ pub fn draw(app: &mut App, frame: &mut Frame) {
     } else {
         status_bar::draw(app, frame, outer[1]);
     }
+
+    message::draw(app, frame);
 }
