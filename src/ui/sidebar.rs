@@ -33,6 +33,12 @@ pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
                 "  "
             };
 
+            let is_connected = node.depth == 0
+                && app
+                    .connected_db
+                    .as_ref()
+                    .is_some_and(|db| db == &node.label);
+
             let style = match node.depth {
                 0 => Style::default()
                     .fg(Color::Yellow)
@@ -41,11 +47,16 @@ pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
                 _ => Style::default().fg(Color::White),
             };
 
-            ListItem::new(Line::from(vec![
+            let mut spans = vec![
                 Span::raw(indent),
                 Span::raw(icon),
                 Span::styled(node.label.clone(), style),
-            ]))
+            ];
+            if is_connected {
+                spans.push(Span::styled(" ●", Style::default().fg(Color::Green)));
+            }
+
+            ListItem::new(Line::from(spans))
         })
         .collect();
 

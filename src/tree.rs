@@ -17,7 +17,7 @@ impl TreeNode {
     pub fn connection(name: &str, children: Vec<TreeNode>) -> Self {
         Self {
             label: name.to_string(),
-            expanded: true,
+            expanded: false,
             children,
         }
     }
@@ -79,7 +79,7 @@ impl TreeNode {
         });
     }
 
-    fn walk_mut(
+    pub fn walk_mut(
         nodes: &mut [TreeNode],
         target: usize,
         counter: &mut usize,
@@ -122,19 +122,22 @@ mod tests {
     }
 
     #[test]
-    fn flatten_shows_expanded_children() {
+    fn flatten_all_collapsed() {
         let tree = sample_tree();
         let flat = TreeNode::flatten_all(&tree);
-        // conn1 is expanded, so its children (Tables, Views) are visible
-        // but Tables and Views are folders (collapsed), so their leaves are hidden
+        // connections start collapsed, so only top-level nodes visible
         let labels: Vec<&str> = flat.iter().map(|n| n.label.as_str()).collect();
-        assert_eq!(labels, vec!["conn1", "Tables", "Views", "conn2"]);
+        assert_eq!(labels, vec!["conn1", "conn2"]);
     }
 
     #[test]
-    fn flatten_depth_values() {
-        let tree = sample_tree();
+    fn flatten_after_expanding_connection() {
+        let mut tree = sample_tree();
+        // Expand conn1
+        TreeNode::toggle_at_index(&mut tree, 0);
         let flat = TreeNode::flatten_all(&tree);
+        let labels: Vec<&str> = flat.iter().map(|n| n.label.as_str()).collect();
+        assert_eq!(labels, vec!["conn1", "Tables", "Views", "conn2"]);
         let depths: Vec<u16> = flat.iter().map(|n| n.depth).collect();
         assert_eq!(depths, vec![0, 1, 1, 0]);
     }
@@ -142,7 +145,8 @@ mod tests {
     #[test]
     fn toggle_expands_collapsed_folder() {
         let mut tree = sample_tree();
-        // "Tables" is at flat index 1, collapsed by default
+        // Expand conn1 first, then expand Tables (index 1)
+        TreeNode::toggle_at_index(&mut tree, 0);
         TreeNode::toggle_at_index(&mut tree, 1);
         let flat = TreeNode::flatten_all(&tree);
         let labels: Vec<&str> = flat.iter().map(|n| n.label.as_str()).collect();
@@ -155,7 +159,8 @@ mod tests {
     #[test]
     fn toggle_collapses_expanded_node() {
         let mut tree = sample_tree();
-        // conn1 is at flat index 0, expanded by default
+        // Expand conn1 then collapse it
+        TreeNode::toggle_at_index(&mut tree, 0);
         TreeNode::toggle_at_index(&mut tree, 0);
         let flat = TreeNode::flatten_all(&tree);
         let labels: Vec<&str> = flat.iter().map(|n| n.label.as_str()).collect();
@@ -166,8 +171,8 @@ mod tests {
     fn collapse_on_already_collapsed_is_noop() {
         let mut tree = sample_tree();
         let before = TreeNode::flatten_all(&tree).len();
-        // "Tables" at index 1 is already collapsed
-        TreeNode::collapse_at_index(&mut tree, 1);
+        // conn1 at index 0 is already collapsed
+        TreeNode::collapse_at_index(&mut tree, 0);
         let after = TreeNode::flatten_all(&tree).len();
         assert_eq!(before, after);
     }
@@ -175,10 +180,11 @@ mod tests {
     #[test]
     fn collapse_shrinks_expanded_node() {
         let mut tree = sample_tree();
-        // Expand "Tables" first
+        // Expand conn1, then expand Tables
+        TreeNode::toggle_at_index(&mut tree, 0);
         TreeNode::toggle_at_index(&mut tree, 1);
         assert_eq!(TreeNode::flatten_all(&tree).len(), 6);
-        // Now collapse it
+        // Collapse Tables
         TreeNode::collapse_at_index(&mut tree, 1);
         assert_eq!(TreeNode::flatten_all(&tree).len(), 4);
     }
@@ -186,7 +192,8 @@ mod tests {
     #[test]
     fn toggle_leaf_is_noop() {
         let mut tree = sample_tree();
-        // Expand Tables so leaves are visible
+        // Expand conn1, then expand Tables so leaves are visible
+        TreeNode::toggle_at_index(&mut tree, 0);
         TreeNode::toggle_at_index(&mut tree, 1);
         let before = TreeNode::flatten_all(&tree).len();
         // "users" is now at index 2, a leaf
@@ -197,7 +204,9 @@ mod tests {
 
     #[test]
     fn flat_node_has_children_flag() {
-        let tree = sample_tree();
+        let mut tree = sample_tree();
+        // Expand conn1 to see its children
+        TreeNode::toggle_at_index(&mut tree, 0);
         let flat = TreeNode::flatten_all(&tree);
         // conn1 has children, Tables has children, Views has children, conn2 has no children
         let flags: Vec<bool> = flat.iter().map(|n| n.has_children).collect();

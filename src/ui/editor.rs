@@ -16,10 +16,16 @@ pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
         Style::default().fg(Color::DarkGray)
     };
 
+    let db_prefix = app
+        .connected_db
+        .as_ref()
+        .map(|name| format!("{} - ", name))
+        .unwrap_or_default();
+
     let title = if focused {
-        format!(" Query [{}] ", app.vim.mode)
+        format!(" {}Query [{}] ", db_prefix, app.vim.mode)
     } else {
-        " Query ".to_string()
+        format!(" {}Query ", db_prefix)
     };
 
     let block = Block::default()

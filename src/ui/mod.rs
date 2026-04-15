@@ -28,9 +28,13 @@ pub fn draw(app: &mut App, frame: &mut Frame) {
     };
 
     let top_area = outer[0];
+    let sidebar_pct = app.sidebar_width;
     let panes = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(25), Constraint::Percentage(75)])
+        .constraints([
+            Constraint::Percentage(sidebar_pct),
+            Constraint::Percentage(100 - sidebar_pct),
+        ])
         .split(top_area);
 
     sidebar::draw(app, frame, panes[0]);
