@@ -20,23 +20,21 @@ pub fn draw(app: &App, frame: &mut Frame, area: Rect) {
             format!(" {focus_label} "),
             Style::default().bg(Color::Cyan).fg(Color::Black).bold(),
         ),
-        Span::raw("  "),
-        Span::styled("Tab", Style::default().fg(Color::Yellow)),
-        Span::raw(" switch pane  "),
-        Span::styled("Ctrl+E", Style::default().fg(Color::Yellow)),
-        Span::raw(" execute  "),
-        Span::styled("q/Esc", Style::default().fg(Color::Yellow)),
-        Span::raw(" quit"),
     ];
 
-    if app.results_visible && app.focus == Focus::Results {
+    if let Some(db) = &app.connected_db {
         spans.push(Span::raw("  "));
-        spans.push(Span::styled("c", Style::default().fg(Color::Yellow)));
-        spans.push(Span::raw(" close results"));
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled("Esc", Style::default().fg(Color::Yellow)));
-        spans.push(Span::raw(" close results"));
+        spans.push(Span::styled(db.as_str(), Style::default().fg(Color::Green)));
     }
+
+    // Right-align the help hint
+    let left_len: usize = spans.iter().map(|s| s.content.len()).sum();
+    let hint = "? help";
+    let padding = area.width as usize - left_len - hint.len();
+    if area.width as usize > left_len + hint.len() {
+        spans.push(Span::raw(" ".repeat(padding)));
+    }
+    spans.push(Span::styled(hint, Style::default().fg(Color::DarkGray)));
 
     let status = Line::from(spans);
     let bar = Paragraph::new(status).style(Style::default().bg(Color::Black));

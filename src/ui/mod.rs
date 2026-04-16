@@ -1,4 +1,5 @@
 mod editor;
+mod help;
 mod message;
 mod results;
 mod sidebar;
@@ -49,4 +50,5 @@ pub fn draw(app: &mut App, frame: &mut Frame) {
     }
 
     message::draw(app, frame);
+    help::draw(app, frame);
 }

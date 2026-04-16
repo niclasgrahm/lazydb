@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use color_eyre::eyre::{Context, Result};
 use serde::Deserialize;
 
+use crate::keybindings::KeybindingsConfig;
+
 fn config_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("~"))
@@ -18,6 +20,8 @@ fn config_dir() -> PathBuf {
 pub struct AppConfig {
     #[serde(default = "default_sidebar_width")]
     pub sidebar_width: u16,
+    #[serde(default)]
+    pub keybindings: KeybindingsConfig,
 }
 
 fn default_sidebar_width() -> u16 {
@@ -28,6 +32,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             sidebar_width: default_sidebar_width(),
+            keybindings: KeybindingsConfig::default(),
         }
     }
 }
@@ -59,6 +64,10 @@ pub struct Profiles {
 pub enum Connection {
     #[serde(rename = "duckdb")]
     DuckDb(DuckDbConnection),
+    #[serde(rename = "postgres")]
+    Postgres(PostgresConnection),
+    #[serde(rename = "clickhouse")]
+    ClickHouse(ClickHouseConnection),
 }
 
 #[derive(Debug, Deserialize)]
@@ -66,10 +75,70 @@ pub struct DuckDbConnection {
     pub path: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PostgresConnection {
+    pub host: String,
+    #[serde(default = "default_pg_port")]
+    pub port: u16,
+    pub user: String,
+    #[serde(default)]
+    pub password: Option<String>,
+    pub database: String,
+    #[serde(default)]
+    pub schema: Option<String>,
+}
+
+fn default_pg_port() -> u16 {
+    5432
+}
+
+impl PostgresConnection {
+    pub fn connection_string(&self) -> String {
+        let mut s = format!(
+            "host={} port={} user={} dbname={}",
+            self.host, self.port, self.user, self.database
+        );
+        if let Some(pw) = &self.password {
+            s.push_str(&format!(" password={pw}"));
+        }
+        s
+    }
+
+    pub fn schema_name(&self) -> &str {
+        self.schema.as_deref().unwrap_or("public")
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ClickHouseConnection {
+    #[serde(default = "default_clickhouse_url")]
+    pub url: String,
+    #[serde(default = "default_clickhouse_user")]
+    pub user: String,
+    #[serde(default)]
+    pub password: Option<String>,
+    #[serde(default = "default_clickhouse_database")]
+    pub database: String,
+}
+
+fn default_clickhouse_url() -> String {
+    "http://localhost:8123".to_string()
+}
+
+fn default_clickhouse_user() -> String {
+    "default".to_string()
+}
+
+fn default_clickhouse_database() -> String {
+    "default".to_string()
+}
+
 impl Connection {
     pub fn type_name(&self) -> &'static str {
         match self {
             Connection::DuckDb(_) => "duckdb",
+            Connection::Postgres(_) => "postgres",
+            Connection::ClickHouse(_) => "clickhouse",
         }
     }
 }

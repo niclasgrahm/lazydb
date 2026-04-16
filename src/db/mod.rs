@@ -1,4 +1,6 @@
+pub mod clickhouse_backend;
 pub mod duckdb_backend;
+pub mod postgres_backend;
 
 use std::fmt;
 

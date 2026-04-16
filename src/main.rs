@@ -1,6 +1,7 @@
 mod app;
 mod config;
 mod db;
+mod keybindings;
 mod tree;
 mod ui;
 mod vim;

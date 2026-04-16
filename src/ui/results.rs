@@ -22,10 +22,26 @@ pub fn draw(app: &App, frame: &mut Frame, area: Rect) {
         return;
     };
 
+    let duration_str = app
+        .query_duration
+        .map(|d| {
+            if d.as_secs() >= 1 {
+                format!("{:.2}s", d.as_secs_f64())
+            } else {
+                format!("{:.1}ms", d.as_secs_f64() * 1000.0)
+            }
+        })
+        .unwrap_or_default();
+
     let title = format!(
-        " Results ({} row{}) ",
+        " Results: {} row{}{} ",
         result.rows.len(),
-        if result.rows.len() == 1 { "" } else { "s" }
+        if result.rows.len() == 1 { "" } else { "s" },
+        if duration_str.is_empty() {
+            String::new()
+        } else {
+            format!(" in {duration_str}")
+        },
     );
 
     let table = ResultTable {
@@ -72,43 +88,52 @@ impl<'a> Widget for ResultTable<'a> {
             })
             .collect();
 
-        // Available width for content: total area minus borders and separators
-        // Layout: │ pad col pad │ pad col pad │ ... │
-        // = (col_count + 1) border chars + col_count * 2 padding chars + sum(widths)
+        // Overhead: │ pad col pad │ pad col pad │ ... │
+        // = (col_count + 1) border chars + col_count * 2 padding chars
         let overhead = (col_count + 1 + col_count * 2) as u16;
         if area.width < overhead {
             return;
         }
         let available = (area.width - overhead) as usize;
         let total_width: usize = widths.iter().sum();
+
         if total_width > available {
             // Shrink columns proportionally
             for w in &mut widths {
                 *w = (*w * available / total_width).max(1);
             }
+        } else if total_width < available {
+            // Distribute extra space across columns
+            let extra = available - total_width;
+            let per_col = extra / col_count;
+            let remainder = extra % col_count;
+            for (i, w) in widths.iter_mut().enumerate() {
+                *w += per_col + if i < remainder { 1 } else { 0 };
+            }
         }
 
         let x0 = area.x;
         let y0 = area.y;
+        let bottom_y = y0 + area.height - 1;
 
         // Row layout:
         // y0:     top border    ┌───┬───┐
         // y0+1:   header row    │ a │ b │
         // y0+2:   header sep    ├───┼───┤
         // y0+3..: data rows     │ 1 │ 2 │
-        // last:   bottom border └───┴───┘
+        // bottom_y: bot border  └───┴───┘
 
         let max_data_rows = if area.height > 4 {
-            (area.height - 4) as usize // top + header + sep + bottom
+            (area.height - 4) as usize
         } else {
             0
         };
 
         // Top border
-        self.draw_horizontal(buf, x0, y0, &widths, '┌', '┬', '┐', border_style);
+        self.draw_horizontal(buf, x0, y0, area.width, &widths, '┌', '┬', '┐', border_style);
 
         // Overlay title on top border
-        if self.title.len() > 0 {
+        if !self.title.is_empty() {
             let title_x = x0 + 2;
             let max_title = (area.width as usize).saturating_sub(4);
             let title: String = self.title.chars().take(max_title).collect();
@@ -123,6 +148,7 @@ impl<'a> Widget for ResultTable<'a> {
             buf,
             x0,
             y0 + 1,
+            area.width,
             &widths,
             &self.result.columns,
             |_| header_style,
@@ -130,7 +156,7 @@ impl<'a> Widget for ResultTable<'a> {
         );
 
         // Header separator
-        self.draw_horizontal(buf, x0, y0 + 2, &widths, '├', '┼', '┤', border_style);
+        self.draw_horizontal(buf, x0, y0 + 2, area.width, &widths, '├', '┼', '┤', border_style);
 
         // Data rows
         let visible_rows = self.result.rows.len().min(max_data_rows);
@@ -141,6 +167,7 @@ impl<'a> Widget for ResultTable<'a> {
                 buf,
                 x0,
                 y0 + 3 + i as u16,
+                area.width,
                 &widths,
                 &strs,
                 |col_idx| value_style(values.get(col_idx)),
@@ -148,11 +175,23 @@ impl<'a> Widget for ResultTable<'a> {
             );
         }
 
-        // Bottom border
-        let bottom_y = y0 + 3 + visible_rows as u16;
-        if bottom_y < y0 + area.height {
-            self.draw_horizontal(buf, x0, bottom_y, &widths, '└', '┴', '┘', border_style);
+        // Empty rows to fill remaining space
+        let empty: Vec<String> = vec![String::new(); col_count];
+        for i in visible_rows..(max_data_rows) {
+            self.draw_row(
+                buf,
+                x0,
+                y0 + 3 + i as u16,
+                area.width,
+                &widths,
+                &empty,
+                |_| Style::default(),
+                border_style,
+            );
         }
+
+        // Bottom border
+        self.draw_horizontal(buf, x0, bottom_y, area.width, &widths, '└', '┴', '┘', border_style);
     }
 }
 
@@ -162,6 +201,7 @@ impl<'a> ResultTable<'a> {
         buf: &mut Buffer,
         x: u16,
         y: u16,
+        total_width: u16,
         widths: &[usize],
         left: char,
         mid: char,
@@ -172,7 +212,6 @@ impl<'a> ResultTable<'a> {
         buf.set_string(cx, y, left.to_string(), style);
         cx += 1;
         for (i, &w) in widths.iter().enumerate() {
-            // pad + content + pad
             let seg: String = "─".repeat(w + 2);
             buf.set_string(cx, y, &seg, style);
             cx += (w + 2) as u16;
@@ -183,6 +222,13 @@ impl<'a> ResultTable<'a> {
             }
             cx += 1;
         }
+        // Fill any remaining space with the horizontal line
+        let end_x = x + total_width;
+        if cx < end_x {
+            // Overwrite the right corner we just placed, extend line, then place corner at end
+            buf.set_string(cx - 1, y, "─".repeat((end_x - cx) as usize + 1), style);
+            buf.set_string(end_x - 1, y, right.to_string(), style);
+        }
     }
 
     fn draw_row(
@@ -190,6 +236,7 @@ impl<'a> ResultTable<'a> {
         buf: &mut Buffer,
         x: u16,
         y: u16,
+        total_width: u16,
         widths: &[usize],
         cells: &[String],
         cell_style: impl Fn(usize) -> Style,
@@ -200,7 +247,6 @@ impl<'a> ResultTable<'a> {
         cx += 1;
         for (i, &w) in widths.iter().enumerate() {
             let text = cells.get(i).map(|s| s.as_str()).unwrap_or("");
-            // Truncate if needed
             let display: String = if text.len() > w {
                 text.chars().take(w.saturating_sub(1)).collect::<String>() + "…"
             } else {
@@ -212,12 +258,15 @@ impl<'a> ResultTable<'a> {
             cx += w as u16;
             buf.set_string(cx, y, " ", border_style);
             cx += 1;
-            if i + 1 < widths.len() {
-                buf.set_string(cx, y, "│", border_style);
-            } else {
-                buf.set_string(cx, y, "│", border_style);
-            }
+            buf.set_string(cx, y, "│", border_style);
             cx += 1;
+        }
+        // Fill remaining space and close with border
+        let end_x = x + total_width;
+        if cx < end_x {
+            let fill = " ".repeat((end_x - cx - 1) as usize);
+            buf.set_string(cx, y, &fill, border_style);
+            buf.set_string(end_x - 1, y, "│", border_style);
         }
     }
 }

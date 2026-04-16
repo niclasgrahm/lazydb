@@ -1,0 +1,28 @@
+services:
+  postgres:
+    image: postgres:17
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: lazydb
+      POSTGRES_PASSWORD: lazydb
+      POSTGRES_DB: lazydb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      CLICKHOUSE_USER: lazydb
+      CLICKHOUSE_PASSWORD: lazydb
+      CLICKHOUSE_DB: lazydb
+    volumes:
+      - chdata:/var/lib/clickhouse
+      - ./docker/clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+volumes:
+  pgdata:
+  chdata:

@@ -1,5 +1,5 @@
 use color_eyre::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyEventKind};
 use ratatui::{
     style::{Color, Style},
     widgets::ListState,
@@ -7,10 +7,14 @@ use ratatui::{
 use tui_textarea::{Input, TextArea};
 
 use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
 
 use crate::config::{AppConfig, Connection, Profiles};
 use crate::db::{self, Database};
+use crate::db::clickhouse_backend::ClickHouse;
 use crate::db::duckdb_backend::DuckDb;
+use crate::db::postgres_backend::Postgres;
+use crate::keybindings::Keybindings;
 use crate::tree::TreeNode;
 use crate::vim::{self, Transition, Vim};
 
@@ -46,6 +50,9 @@ pub struct App<'a> {
     pub message: Option<Message>,
     pub profiles: Profiles,
     pub connection: Option<Box<dyn Database>>,
+    pub query_duration: Option<Duration>,
+    pub show_help: bool,
+    pub keys: Keybindings,
     label_to_profile: BTreeMap<String, String>,
 }
 
@@ -77,6 +84,9 @@ impl<'a> App<'a> {
             message: None,
             profiles,
             connection: None,
+            query_duration: None,
+            show_help: false,
+            keys: Keybindings::from_config(config.keybindings),
             label_to_profile,
         }
     }
@@ -104,8 +114,10 @@ impl<'a> App<'a> {
             self.show_error("No database connected");
             return;
         };
+        let start = Instant::now();
         match conn.execute_query(query.trim()) {
             Ok(result) => {
+                self.query_duration = Some(start.elapsed());
                 self.query_result = Some(result);
                 self.results_visible = true;
                 self.focus = Focus::Results;
@@ -122,39 +134,49 @@ impl<'a> App<'a> {
                 return Ok(());
             }
 
+            // Dismiss message overlay
             if self.message.is_some() {
-                match key.code {
-                    KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
-                        self.message = None;
-                    }
-                    _ => {}
+                self.message = None;
+                return Ok(());
+            }
+
+            // Toggle help overlay
+            if self.show_help {
+                self.show_help = false;
+                return Ok(());
+            }
+
+            let in_normal = self.focus != Focus::QueryEditor
+                || self.vim.mode == vim::Mode::Normal;
+
+            // Global keybindings (only when not in editor insert mode)
+            if in_normal {
+                if self.keys.global.show_help.matches(key) {
+                    self.show_help = true;
+                    return Ok(());
                 }
-                return Ok(());
-            }
-
-            if key.code == KeyCode::Char('e') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                self.execute_query();
-                return Ok(());
-            }
-
-            let in_normal = self.vim.mode == vim::Mode::Normal;
-            if key.code == KeyCode::Tab && (self.focus != Focus::QueryEditor || in_normal) {
-                self.focus = match self.focus {
-                    Focus::Sidebar => Focus::QueryEditor,
-                    Focus::QueryEditor if self.results_visible => Focus::Results,
-                    Focus::QueryEditor => Focus::Sidebar,
-                    Focus::Results => Focus::Sidebar,
-                };
-                return Ok(());
-            }
-            if key.code == KeyCode::BackTab {
-                self.focus = match self.focus {
-                    Focus::Sidebar if self.results_visible => Focus::Results,
-                    Focus::Sidebar => Focus::QueryEditor,
-                    Focus::QueryEditor => Focus::Sidebar,
-                    Focus::Results => Focus::QueryEditor,
-                };
-                return Ok(());
+                if self.keys.global.execute_query.matches(key) {
+                    self.execute_query();
+                    return Ok(());
+                }
+                if self.keys.global.next_pane.matches(key) {
+                    self.focus = match self.focus {
+                        Focus::Sidebar => Focus::QueryEditor,
+                        Focus::QueryEditor if self.results_visible => Focus::Results,
+                        Focus::QueryEditor => Focus::Sidebar,
+                        Focus::Results => Focus::Sidebar,
+                    };
+                    return Ok(());
+                }
+                if self.keys.global.prev_pane.matches(key) {
+                    self.focus = match self.focus {
+                        Focus::Sidebar if self.results_visible => Focus::Results,
+                        Focus::Sidebar => Focus::QueryEditor,
+                        Focus::QueryEditor => Focus::Sidebar,
+                        Focus::Results => Focus::QueryEditor,
+                    };
+                    return Ok(());
+                }
             }
 
             match self.focus {
@@ -170,65 +192,61 @@ impl<'a> App<'a> {
                         }
                     }
                 }
-                Focus::Sidebar => match key.code {
-                    KeyCode::Char('q') => self.running = false,
-                    KeyCode::Esc => self.running = false,
-                    _ => self.handle_sidebar_key(key.code),
-                },
-                Focus::Results => match key.code {
-                    KeyCode::Char('q') => self.running = false,
-                    KeyCode::Esc => {
-                        self.results_visible = false;
-                        self.focus = Focus::QueryEditor;
-                    }
-                    KeyCode::Char('c') => {
-                        self.results_visible = false;
-                        self.focus = Focus::QueryEditor;
-                    }
-                    _ => {}
-                },
+                Focus::Sidebar => self.handle_sidebar_key(key),
+                Focus::Results => self.handle_results_key(key),
             }
         }
         Ok(())
     }
 
-    fn handle_sidebar_key(&mut self, code: KeyCode) {
+    fn handle_sidebar_key(&mut self, key: &crossterm::event::KeyEvent) {
         let flat = TreeNode::flatten_all(&self.sidebar_items);
         let item_count = flat.len();
-        match code {
-            KeyCode::Up | KeyCode::Char('k') => {
-                let selected = self.sidebar_state.selected().unwrap_or(0);
-                if selected > 0 {
-                    self.sidebar_state.select(Some(selected - 1));
-                }
+        let kb = &self.keys.sidebar;
+
+        if kb.quit.matches(key) {
+            self.running = false;
+        } else if kb.navigate_up.matches(key) {
+            let selected = self.sidebar_state.selected().unwrap_or(0);
+            if selected > 0 {
+                self.sidebar_state.select(Some(selected - 1));
             }
-            KeyCode::Down | KeyCode::Char('j') => {
-                let selected = self.sidebar_state.selected().unwrap_or(0);
-                if selected + 1 < item_count {
-                    self.sidebar_state.select(Some(selected + 1));
-                }
+        } else if kb.navigate_down.matches(key) {
+            let selected = self.sidebar_state.selected().unwrap_or(0);
+            if selected + 1 < item_count {
+                self.sidebar_state.select(Some(selected + 1));
             }
-            KeyCode::Enter => {
-                if let Some(selected) = self.sidebar_state.selected() {
-                    let is_connection = flat.get(selected).is_some_and(|n| n.depth == 0);
-                    if is_connection {
-                        self.toggle_connection(selected);
-                    } else {
-                        TreeNode::toggle_at_index(&mut self.sidebar_items, selected);
-                    }
-                }
-            }
-            KeyCode::Right | KeyCode::Char('l') => {
-                if let Some(selected) = self.sidebar_state.selected() {
+        } else if kb.activate.matches(key) {
+            if let Some(selected) = self.sidebar_state.selected() {
+                let is_connection = flat.get(selected).is_some_and(|n| n.depth == 0);
+                if is_connection {
+                    self.toggle_connection(selected);
+                } else {
                     TreeNode::toggle_at_index(&mut self.sidebar_items, selected);
                 }
             }
-            KeyCode::Left | KeyCode::Char('h') => {
-                if let Some(selected) = self.sidebar_state.selected() {
-                    TreeNode::collapse_at_index(&mut self.sidebar_items, selected);
-                }
+        } else if kb.expand.matches(key) {
+            if let Some(selected) = self.sidebar_state.selected() {
+                TreeNode::toggle_at_index(&mut self.sidebar_items, selected);
             }
-            _ => {}
+        } else if kb.collapse.matches(key) {
+            if let Some(selected) = self.sidebar_state.selected() {
+                TreeNode::collapse_at_index(&mut self.sidebar_items, selected);
+            }
+        } else if kb.preview.matches(key) {
+            if let Some(selected) = self.sidebar_state.selected() {
+                self.preview_table(selected);
+            }
+        }
+    }
+
+    fn handle_results_key(&mut self, key: &crossterm::event::KeyEvent) {
+        let kb = &self.keys.results;
+        if kb.quit.matches(key) {
+            self.running = false;
+        } else if kb.close.matches(key) {
+            self.results_visible = false;
+            self.focus = Focus::QueryEditor;
         }
     }
 
@@ -264,21 +282,38 @@ impl<'a> App<'a> {
                 .and_then(|k| self.profiles.connections.get(k));
 
             if let Some(profile) = profile {
-                match profile {
-                    Connection::DuckDb(cfg) => match DuckDb::connect(&cfg.path) {
-                        Ok(mut db) => {
-                            match db.schema_info() {
-                                Ok(schema) => self.populate_schema(&label, schema),
-                                Err(e) => self.show_error(format!("Schema error: {e}")),
-                            }
-                            self.connection = Some(Box::new(db));
-                            self.connected_db = Some(label.clone());
+                let result: Result<Box<dyn Database>, String> = match profile {
+                    Connection::DuckDb(cfg) => {
+                        DuckDb::connect(&cfg.path).map(|db| Box::new(db) as Box<dyn Database>)
+                    }
+                    Connection::Postgres(cfg) => {
+                        Postgres::connect(&cfg.connection_string(), cfg.schema_name())
+                            .map(|db| Box::new(db) as Box<dyn Database>)
+                    }
+                    Connection::ClickHouse(cfg) => {
+                        ClickHouse::connect(
+                            &cfg.url,
+                            &cfg.database,
+                            &cfg.user,
+                            cfg.password.as_deref(),
+                        )
+                        .map(|db| Box::new(db) as Box<dyn Database>)
+                    }
+                };
+
+                match result {
+                    Ok(mut db) => {
+                        match db.schema_info() {
+                            Ok(schema) => self.populate_schema(&label, schema),
+                            Err(e) => self.show_error(format!("Schema error: {e}")),
                         }
-                        Err(e) => {
-                            self.show_error(format!("Connection failed: {e}"));
-                            return;
-                        }
-                    },
+                        self.connection = Some(db);
+                        self.connected_db = Some(label.clone());
+                    }
+                    Err(e) => {
+                        self.show_error(format!("Connection failed: {e}"));
+                        return;
+                    }
                 }
             }
 
@@ -289,6 +324,37 @@ impl<'a> App<'a> {
                 self.sidebar_state.select(Some(new_idx));
             }
         }
+    }
+
+    fn preview_table(&mut self, flat_index: usize) {
+        let flat = TreeNode::flatten_all(&self.sidebar_items);
+        let Some(node) = flat.get(flat_index) else { return };
+
+        // Must be a leaf at depth 2 (under Tables or Views)
+        if node.depth != 2 || node.has_children {
+            return;
+        }
+
+        // Walk backwards to find the parent folder name
+        let parent_label = flat[..flat_index]
+            .iter()
+            .rev()
+            .find(|n| n.depth == 1)
+            .map(|n| n.label.as_str());
+
+        if !matches!(parent_label, Some("Tables" | "Views")) {
+            return;
+        }
+
+        let table_name = &node.label;
+        let query = format!("SELECT * FROM {table_name} LIMIT 10");
+
+        // Clear editor and insert the query
+        self.editor.select_all();
+        self.editor.cut();
+        self.editor.insert_str(&query);
+        self.focus = Focus::QueryEditor;
+        self.vim = Vim::new(vim::Mode::Normal);
     }
 
     fn refresh_schema(&mut self) {
