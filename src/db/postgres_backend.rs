@@ -1,7 +1,7 @@
 use postgres::types::Type;
 use postgres::Client;
 
-use super::{Database, QueryResult, SchemaInfo, Value};
+use super::{Database, QueryResult, SchemaNode, Value};
 
 pub struct Postgres {
     client: Client,
@@ -51,22 +51,68 @@ impl Database for Postgres {
         })
     }
 
-    fn schema_info(&mut self) -> Result<SchemaInfo, String> {
-        let tables = self.query_string_list(
+    fn schema_tree(&mut self) -> Result<Vec<SchemaNode>, String> {
+        let table_names = self.query_string_list(
             "SELECT table_name FROM information_schema.tables \
              WHERE table_schema = $1 AND table_type = 'BASE TABLE' \
              ORDER BY table_name",
         )?;
-        let views = self.query_string_list(
+        let view_names = self.query_string_list(
             "SELECT table_name FROM information_schema.tables \
              WHERE table_schema = $1 AND table_type = 'VIEW' \
              ORDER BY table_name",
         )?;
-        Ok(SchemaInfo { tables, views })
+
+        let tables: Vec<SchemaNode> = table_names
+            .into_iter()
+            .map(|name| {
+                let cols = self.query_columns(&name).unwrap_or_default();
+                SchemaNode::group(name, cols)
+            })
+            .collect();
+
+        let views: Vec<SchemaNode> = view_names
+            .into_iter()
+            .map(|name| {
+                let cols = self.query_columns(&name).unwrap_or_default();
+                SchemaNode::group(name, cols)
+            })
+            .collect();
+
+        let mut children = Vec::new();
+        if !tables.is_empty() {
+            children.push(SchemaNode::group("Tables", tables));
+        }
+        if !views.is_empty() {
+            children.push(SchemaNode::group("Views", views));
+        }
+
+        // Wrap in schema node
+        Ok(vec![SchemaNode::group(&self.schema, children)])
     }
 }
 
 impl Postgres {
+    fn query_columns(&mut self, table_name: &str) -> Result<Vec<SchemaNode>, String> {
+        let rows = self
+            .client
+            .query(
+                "SELECT column_name, data_type FROM information_schema.columns \
+                 WHERE table_schema = $1 AND table_name = $2 \
+                 ORDER BY ordinal_position",
+                &[&self.schema, &table_name.to_string()],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(rows
+            .iter()
+            .map(|r| {
+                let name: String = r.get(0);
+                let data_type: String = r.get(1);
+                SchemaNode::leaf(format!("{name} ({data_type})"))
+            })
+            .collect())
+    }
+
     fn query_string_list(&mut self, sql: &str) -> Result<Vec<String>, String> {
         let rows = self
             .client

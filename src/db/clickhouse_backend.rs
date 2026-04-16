@@ -1,6 +1,6 @@
 use serde_json;
 
-use super::{Database, QueryResult, SchemaInfo, Value};
+use super::{Database, QueryResult, SchemaNode, Value};
 
 pub struct ClickHouse {
     base_url: String,
@@ -66,6 +66,30 @@ impl ClickHouse {
         }
         Ok(result)
     }
+
+    fn query_columns(&self, table_name: &str) -> Result<Vec<SchemaNode>, String> {
+        let sql = format!(
+            "SELECT name, type FROM system.columns \
+             WHERE database = '{}' AND table = '{}' \
+             ORDER BY position",
+            self.database, table_name
+        );
+        let body = self.raw_query(&sql)?;
+        let json: serde_json::Value =
+            serde_json::from_str(&body).map_err(|e| format!("JSON parse error: {e}"))?;
+        let rows = json["data"]
+            .as_array()
+            .ok_or("Expected 'data' array in response")?;
+        let mut result = Vec::new();
+        for row in rows {
+            if let Some(arr) = row.as_array() {
+                let name = arr.first().and_then(|v| v.as_str()).unwrap_or("?");
+                let data_type = arr.get(1).and_then(|v| v.as_str()).unwrap_or("?");
+                result.push(SchemaNode::leaf(format!("{name} ({data_type})")));
+            }
+        }
+        Ok(result)
+    }
 }
 
 impl Database for ClickHouse {
@@ -96,20 +120,45 @@ impl Database for ClickHouse {
         Ok(QueryResult { columns, rows })
     }
 
-    fn schema_info(&mut self) -> Result<SchemaInfo, String> {
-        let tables = self.query_string_list(&format!(
+    fn schema_tree(&mut self) -> Result<Vec<SchemaNode>, String> {
+        let table_names = self.query_string_list(&format!(
             "SELECT name FROM system.tables \
              WHERE database = '{}' AND engine != 'View' \
              ORDER BY name",
             self.database
         ))?;
-        let views = self.query_string_list(&format!(
+        let view_names = self.query_string_list(&format!(
             "SELECT name FROM system.tables \
              WHERE database = '{}' AND engine = 'View' \
              ORDER BY name",
             self.database
         ))?;
-        Ok(SchemaInfo { tables, views })
+
+        let tables: Vec<SchemaNode> = table_names
+            .into_iter()
+            .map(|name| {
+                let cols = self.query_columns(&name).unwrap_or_default();
+                SchemaNode::group(name, cols)
+            })
+            .collect();
+
+        let views: Vec<SchemaNode> = view_names
+            .into_iter()
+            .map(|name| {
+                let cols = self.query_columns(&name).unwrap_or_default();
+                SchemaNode::group(name, cols)
+            })
+            .collect();
+
+        let mut children = Vec::new();
+        if !tables.is_empty() {
+            children.push(SchemaNode::group("Tables", tables));
+        }
+        if !views.is_empty() {
+            children.push(SchemaNode::group("Views", views));
+        }
+
+        Ok(children)
     }
 }
 

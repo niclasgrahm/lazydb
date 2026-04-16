@@ -32,14 +32,25 @@ pub struct QueryResult {
     pub rows: Vec<Vec<Value>>,
 }
 
-/// Schema object name lists.
-pub struct SchemaInfo {
-    pub tables: Vec<String>,
-    pub views: Vec<String>,
+/// A node in the schema object tree returned by backends.
+/// Each backend builds its own hierarchy (e.g. schema → tables → columns).
+pub struct SchemaNode {
+    pub label: String,
+    pub children: Vec<SchemaNode>,
+}
+
+impl SchemaNode {
+    pub fn leaf(label: impl Into<String>) -> Self {
+        Self { label: label.into(), children: vec![] }
+    }
+
+    pub fn group(label: impl Into<String>, children: Vec<SchemaNode>) -> Self {
+        Self { label: label.into(), children }
+    }
 }
 
 /// Trait that all database backends implement.
 pub trait Database {
     fn execute_query(&mut self, sql: &str) -> Result<QueryResult, String>;
-    fn schema_info(&mut self) -> Result<SchemaInfo, String>;
+    fn schema_tree(&mut self) -> Result<Vec<SchemaNode>, String>;
 }

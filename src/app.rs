@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use crate::config::{AppConfig, Connection, Profiles};
-use crate::db::{self, Database};
+use crate::db::{self, Database, SchemaNode};
 use crate::db::clickhouse_backend::ClickHouse;
 use crate::db::duckdb_backend::DuckDb;
 use crate::db::postgres_backend::Postgres;
@@ -303,8 +303,8 @@ impl<'a> App<'a> {
 
                 match result {
                     Ok(mut db) => {
-                        match db.schema_info() {
-                            Ok(schema) => self.populate_schema(&label, schema),
+                        match db.schema_tree() {
+                            Ok(tree) => self.populate_schema(&label, tree),
                             Err(e) => self.show_error(format!("Schema error: {e}")),
                         }
                         self.connection = Some(db);
@@ -330,16 +330,11 @@ impl<'a> App<'a> {
         let flat = TreeNode::flatten_all(&self.sidebar_items);
         let Some(node) = flat.get(flat_index) else { return };
 
-        // Must be a leaf at depth 2 (under Tables or Views)
-        if node.depth != 2 || node.has_children {
-            return;
-        }
-
-        // Walk backwards to find the parent folder name
+        // Find the nearest ancestor whose label is "Tables" or "Views"
         let parent_label = flat[..flat_index]
             .iter()
             .rev()
-            .find(|n| n.depth == 1)
+            .find(|n| n.depth < node.depth)
             .map(|n| n.label.as_str());
 
         if !matches!(parent_label, Some("Tables" | "Views")) {
@@ -360,28 +355,24 @@ impl<'a> App<'a> {
     fn refresh_schema(&mut self) {
         let Some(label) = self.connected_db.clone() else { return };
         let Some(conn) = self.connection.as_mut() else { return };
-        match conn.schema_info() {
-            Ok(schema) => self.populate_schema(&label, schema),
+        match conn.schema_tree() {
+            Ok(tree) => self.populate_schema(&label, tree),
             Err(_) => {} // silent — don't interrupt the user's query result
         }
     }
 
-    fn populate_schema(&mut self, connection_label: &str, schema: db::SchemaInfo) {
+    fn populate_schema(&mut self, connection_label: &str, schema_nodes: Vec<SchemaNode>) {
+        fn to_tree(node: SchemaNode) -> TreeNode {
+            if node.children.is_empty() {
+                TreeNode::leaf(&node.label)
+            } else {
+                TreeNode::folder(&node.label, node.children.into_iter().map(to_tree).collect())
+            }
+        }
+
         for node in self.sidebar_items.iter_mut() {
             if node.label == connection_label {
-                for child in node.children.iter_mut() {
-                    match child.label.as_str() {
-                        "Tables" => {
-                            child.children =
-                                schema.tables.iter().map(|t| TreeNode::leaf(t)).collect();
-                        }
-                        "Views" => {
-                            child.children =
-                                schema.views.iter().map(|v| TreeNode::leaf(v)).collect();
-                        }
-                        _ => {}
-                    }
-                }
+                node.children = schema_nodes.into_iter().map(to_tree).collect();
                 break;
             }
         }
@@ -390,9 +381,7 @@ impl<'a> App<'a> {
     fn clear_schema(&mut self, connection_label: &str) {
         for node in self.sidebar_items.iter_mut() {
             if node.label == connection_label {
-                for child in node.children.iter_mut() {
-                    child.children.clear();
-                }
+                node.children.clear();
                 break;
             }
         }
@@ -407,13 +396,7 @@ fn build_sidebar_tree(profiles: &Profiles) -> (Vec<TreeNode>, BTreeMap<String, S
         .map(|(name, conn)| {
             let label = format!("{} ({})", name, conn.type_name());
             label_map.insert(label.clone(), name.clone());
-            TreeNode::connection(
-                &label,
-                vec![
-                    TreeNode::folder("Tables", vec![]),
-                    TreeNode::folder("Views", vec![]),
-                ],
-            )
+            TreeNode::connection(&label, vec![])
         })
         .collect();
     (nodes, label_map)
