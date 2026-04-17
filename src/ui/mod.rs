@@ -43,6 +43,7 @@ pub fn draw(app: &mut App, frame: &mut Frame) {
     editor::draw(app, frame, panes[1]);
 
     if app.results_visible {
+        app.results_area = outer[1];
         results::draw(app, frame, outer[1]);
         status_bar::draw(app, frame, outer[2]);
     } else {

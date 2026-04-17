@@ -20,6 +20,7 @@ pub fn draw(app: &App, frame: &mut Frame) {
     lines.push(section_header("Global"));
     let g = &app.keys.global;
     lines.push(key_line(&g.execute_query, "Execute query"));
+    lines.push(key_line(&g.format_query, "Format query"));
     lines.push(key_line(&g.next_pane, "Next pane"));
     lines.push(key_line(&g.prev_pane, "Previous pane"));
     lines.push(key_line(&g.show_help, "Toggle help"));
@@ -63,6 +64,12 @@ pub fn draw(app: &App, frame: &mut Frame) {
         Focus::Results => {
             lines.push(section_header("Results"));
             let r = &app.keys.results;
+            lines.push(key_line(&r.scroll_up, "Scroll up"));
+            lines.push(key_line(&r.scroll_down, "Scroll down"));
+            lines.push(key_line(&r.scroll_left, "Scroll left"));
+            lines.push(key_line(&r.scroll_right, "Scroll right"));
+            lines.push(key_line(&r.next_page, "Next page"));
+            lines.push(key_line(&r.prev_page, "Previous page"));
             lines.push(key_line(&r.close, "Close results"));
             lines.push(key_line(&r.quit, "Quit"));
         }

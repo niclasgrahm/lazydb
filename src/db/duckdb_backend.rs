@@ -58,6 +58,8 @@ impl Database for DuckDb {
     fn schema_tree(&mut self) -> Result<Vec<SchemaNode>, String> {
         let schemas = self.query_string_list(
             "SELECT schema_name FROM information_schema.schemata \
+             WHERE catalog_name = current_database() \
+             AND schema_name NOT IN ('information_schema', 'pg_catalog') \
              ORDER BY schema_name",
         )?;
 

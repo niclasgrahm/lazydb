@@ -1,6 +1,7 @@
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyEventKind};
 use ratatui::{
+    layout::Rect,
     style::{Color, Style},
     widgets::ListState,
 };
@@ -36,6 +37,8 @@ pub struct Message {
     pub level: MessageLevel,
 }
 
+pub const RESULTS_PAGE_SIZE: usize = 100;
+
 pub struct App<'a> {
     pub sidebar_items: Vec<TreeNode>,
     pub sidebar_state: ListState,
@@ -54,6 +57,13 @@ pub struct App<'a> {
     pub show_help: bool,
     pub keys: Keybindings,
     label_to_profile: BTreeMap<String, String>,
+    // Results navigation
+    pub results_scroll_row: usize,
+    pub results_scroll_col: usize,
+    pub results_page: usize,
+    pub results_has_more: bool,
+    results_query: Option<String>,
+    pub results_area: Rect,
 }
 
 impl<'a> App<'a> {
@@ -88,6 +98,12 @@ impl<'a> App<'a> {
             show_help: false,
             keys: Keybindings::from_config(config.keybindings),
             label_to_profile,
+            results_scroll_row: 0,
+            results_scroll_col: 0,
+            results_page: 0,
+            results_has_more: false,
+            results_query: None,
+            results_area: Rect::default(),
         }
     }
 
@@ -105,26 +121,82 @@ impl<'a> App<'a> {
         });
     }
 
+    pub fn format_query(&mut self) {
+        let query: String = self.editor.lines().join("\n");
+        if query.trim().is_empty() {
+            return;
+        }
+        let formatted = sqlformat::format(
+            &query,
+            &sqlformat::QueryParams::None,
+            &sqlformat::FormatOptions {
+                indent: sqlformat::Indent::Spaces(2),
+                uppercase: Some(true),
+                lines_between_queries: 1,
+                ..Default::default()
+            },
+        );
+        self.editor.select_all();
+        self.editor.cut();
+        self.editor.insert_str(&formatted);
+    }
+
     pub fn execute_query(&mut self) {
         let query: String = self.editor.lines().join("\n");
         if query.trim().is_empty() {
             return;
         }
+        self.results_query = Some(query.trim().to_string());
+        self.results_page = 0;
+        self.results_scroll_row = 0;
+        self.results_scroll_col = 0;
+        self.run_paged_query();
+        self.refresh_schema();
+    }
+
+    fn run_paged_query(&mut self) {
+        let Some(query) = &self.results_query else { return };
         let Some(conn) = self.connection.as_mut() else {
             self.show_error("No database connected");
             return;
         };
+        let offset = self.results_page * RESULTS_PAGE_SIZE;
+        let paged = format!(
+            "SELECT * FROM ({query}) AS _lazydb_q LIMIT {limit} OFFSET {offset}",
+            limit = RESULTS_PAGE_SIZE + 1,
+        );
         let start = Instant::now();
-        match conn.execute_query(query.trim()) {
-            Ok(result) => {
+        match conn.execute_query(&paged) {
+            Ok(mut result) => {
                 self.query_duration = Some(start.elapsed());
+                self.results_has_more = result.rows.len() > RESULTS_PAGE_SIZE;
+                if self.results_has_more {
+                    result.rows.truncate(RESULTS_PAGE_SIZE);
+                }
                 self.query_result = Some(result);
                 self.results_visible = true;
                 self.focus = Focus::Results;
-                self.refresh_schema();
             }
             Err(e) => self.show_error(format!("Query error: {e}")),
         }
+    }
+
+    pub fn results_next_page(&mut self) {
+        if !self.results_has_more {
+            return;
+        }
+        self.results_page += 1;
+        self.results_scroll_row = 0;
+        self.run_paged_query();
+    }
+
+    pub fn results_prev_page(&mut self) {
+        if self.results_page == 0 {
+            return;
+        }
+        self.results_page -= 1;
+        self.results_scroll_row = 0;
+        self.run_paged_query();
     }
 
     pub fn handle_event(&mut self) -> Result<()> {
@@ -157,6 +229,10 @@ impl<'a> App<'a> {
                 }
                 if self.keys.global.execute_query.matches(key) {
                     self.execute_query();
+                    return Ok(());
+                }
+                if self.keys.global.format_query.matches(key) {
+                    self.format_query();
                     return Ok(());
                 }
                 if self.keys.global.next_pane.matches(key) {
@@ -242,11 +318,70 @@ impl<'a> App<'a> {
 
     fn handle_results_key(&mut self, key: &crossterm::event::KeyEvent) {
         let kb = &self.keys.results;
+        let result = self.query_result.as_ref();
+        let row_count = result.map(|r| r.rows.len()).unwrap_or(0);
+        let col_count = result.map(|r| r.columns.len()).unwrap_or(0);
+
+        // Compute viewport capacity from last rendered area
+        let area = self.results_area;
+        let max_data_rows = if area.height > 5 {
+            (area.height - 5) as usize
+        } else {
+            0
+        };
+
+        // Check if all columns fit at current scroll position
+        let all_cols_visible = if let Some(r) = result {
+            let inner_width = (area.width.saturating_sub(2)) as usize;
+            let widths: Vec<usize> = r.columns.iter().enumerate().map(|(i, col)| {
+                let max_data = r.rows.iter()
+                    .map(|row| row.get(i).map(|v| v.to_string().len()).unwrap_or(0))
+                    .max()
+                    .unwrap_or(0);
+                col.len().max(max_data).max(1)
+            }).collect();
+            // Check if all columns from scroll_col onward fit
+            let mut used = 0;
+            let mut fits = true;
+            for (idx, &w) in widths.iter().enumerate().skip(self.results_scroll_col) {
+                let needed = w + 3;
+                if idx == self.results_scroll_col {
+                    used += needed + 1;
+                } else if used + needed <= inner_width {
+                    used += needed;
+                } else {
+                    fits = false;
+                    break;
+                }
+            }
+            fits
+        } else {
+            true
+        };
+
         if kb.quit.matches(key) {
             self.running = false;
         } else if kb.close.matches(key) {
             self.results_visible = false;
             self.focus = Focus::QueryEditor;
+        } else if kb.scroll_down.matches(key) {
+            // Only scroll if rows overflow the viewport
+            if row_count > max_data_rows && self.results_scroll_row + max_data_rows < row_count {
+                self.results_scroll_row += 1;
+            }
+        } else if kb.scroll_up.matches(key) {
+            self.results_scroll_row = self.results_scroll_row.saturating_sub(1);
+        } else if kb.scroll_right.matches(key) {
+            // Only scroll if there are clipped columns to the right
+            if !all_cols_visible && self.results_scroll_col + 1 < col_count {
+                self.results_scroll_col += 1;
+            }
+        } else if kb.scroll_left.matches(key) {
+            self.results_scroll_col = self.results_scroll_col.saturating_sub(1);
+        } else if kb.next_page.matches(key) {
+            self.results_next_page();
+        } else if kb.prev_page.matches(key) {
+            self.results_prev_page();
         }
     }
 

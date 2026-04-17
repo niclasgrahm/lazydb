@@ -29,7 +29,13 @@ impl ClickHouse {
 
     fn raw_query(&self, sql: &str) -> Result<String, String> {
         let full_sql = format!("{sql} FORMAT JSONCompact");
-        let mut req = ureq::post(&self.base_url)
+        let agent = ureq::Agent::new_with_config(
+            ureq::config::Config::builder()
+                .http_status_as_error(false)
+                .build(),
+        );
+        let mut req = agent
+            .post(&self.base_url)
             .query("database", &self.database)
             .query("user", &self.user);
 
@@ -37,12 +43,21 @@ impl ClickHouse {
             req = req.query("password", pw);
         }
 
-        let body = req
+        let mut response = req
             .send(full_sql.as_bytes())
-            .map_err(|e| format!("ClickHouse request failed: {e}"))?
+            .map_err(|e| format!("ClickHouse request failed: {e}"))?;
+
+        let status = response.status().as_u16();
+        let body = response
             .body_mut()
             .read_to_string()
             .map_err(|e| format!("Failed to read ClickHouse response: {e}"))?;
+
+        if status >= 400 {
+            // ClickHouse returns the error message in the response body
+            let msg = body.trim().to_string();
+            return Err(msg);
+        }
 
         Ok(body)
     }

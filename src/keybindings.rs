@@ -43,6 +43,7 @@ impl Default for KeybindingsConfig {
 #[serde(default)]
 pub struct GlobalKeysConfig {
     pub execute_query: KeyInput,
+    pub format_query: KeyInput,
     pub next_pane: KeyInput,
     pub prev_pane: KeyInput,
     pub show_help: KeyInput,
@@ -52,6 +53,7 @@ impl Default for GlobalKeysConfig {
     fn default() -> Self {
         Self {
             execute_query: KeyInput::Single("ctrl+e".into()),
+            format_query: KeyInput::Single("ctrl+f".into()),
             next_pane: KeyInput::Single("tab".into()),
             prev_pane: KeyInput::Single("shift+tab".into()),
             show_help: KeyInput::Single("?".into()),
@@ -88,6 +90,12 @@ impl Default for SidebarKeysConfig {
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct ResultsKeysConfig {
+    pub scroll_up: KeyInput,
+    pub scroll_down: KeyInput,
+    pub scroll_left: KeyInput,
+    pub scroll_right: KeyInput,
+    pub next_page: KeyInput,
+    pub prev_page: KeyInput,
     pub close: KeyInput,
     pub quit: KeyInput,
 }
@@ -95,6 +103,12 @@ pub struct ResultsKeysConfig {
 impl Default for ResultsKeysConfig {
     fn default() -> Self {
         Self {
+            scroll_up: KeyInput::Multiple(vec!["k".into(), "up".into()]),
+            scroll_down: KeyInput::Multiple(vec!["j".into(), "down".into()]),
+            scroll_left: KeyInput::Multiple(vec!["h".into(), "left".into()]),
+            scroll_right: KeyInput::Multiple(vec!["l".into(), "right".into()]),
+            next_page: KeyInput::Multiple(vec!["n".into(), "pagedown".into()]),
+            prev_page: KeyInput::Multiple(vec!["p".into(), "pageup".into()]),
             close: KeyInput::Multiple(vec!["c".into(), "esc".into()]),
             quit: KeyInput::Single("q".into()),
         }
@@ -146,6 +160,8 @@ impl KeyBind {
             "delete" => KeyCode::Delete,
             "home" => KeyCode::Home,
             "end" => KeyCode::End,
+            "pageup" => KeyCode::PageUp,
+            "pagedown" => KeyCode::PageDown,
             "space" => KeyCode::Char(' '),
             s if s.len() == 1 => KeyCode::Char(s.chars().next().unwrap()),
             _ => KeyCode::Null,
@@ -181,6 +197,7 @@ impl Action {
 
 pub struct GlobalKeys {
     pub execute_query: Action,
+    pub format_query: Action,
     pub next_pane: Action,
     pub prev_pane: Action,
     pub show_help: Action,
@@ -197,6 +214,12 @@ pub struct SidebarKeys {
 }
 
 pub struct ResultsKeys {
+    pub scroll_up: Action,
+    pub scroll_down: Action,
+    pub scroll_left: Action,
+    pub scroll_right: Action,
+    pub next_page: Action,
+    pub prev_page: Action,
     pub close: Action,
     pub quit: Action,
 }
@@ -212,6 +235,7 @@ impl Keybindings {
         Self {
             global: GlobalKeys {
                 execute_query: Action::from_config(&config.global.execute_query),
+                format_query: Action::from_config(&config.global.format_query),
                 next_pane: Action::from_config(&config.global.next_pane),
                 prev_pane: Action::from_config(&config.global.prev_pane),
                 show_help: Action::from_config(&config.global.show_help),
@@ -226,6 +250,12 @@ impl Keybindings {
                 quit: Action::from_config(&config.sidebar.quit),
             },
             results: ResultsKeys {
+                scroll_up: Action::from_config(&config.results.scroll_up),
+                scroll_down: Action::from_config(&config.results.scroll_down),
+                scroll_left: Action::from_config(&config.results.scroll_left),
+                scroll_right: Action::from_config(&config.results.scroll_right),
+                next_page: Action::from_config(&config.results.next_page),
+                prev_page: Action::from_config(&config.results.prev_page),
                 close: Action::from_config(&config.results.close),
                 quit: Action::from_config(&config.results.quit),
             },

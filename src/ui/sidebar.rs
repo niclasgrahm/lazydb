@@ -23,10 +23,16 @@ pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
         .border_style(border_style);
 
     let flat = TreeNode::flatten_all(&app.sidebar_items);
+    let selected = app.sidebar_state.selected();
     let items: Vec<ListItem> = flat
         .iter()
-        .map(|node| {
-            let indent = "  ".repeat(node.depth as usize);
+        .enumerate()
+        .map(|(i, node)| {
+            let indent = if node.depth > 0 {
+                "  ".repeat(node.depth as usize)
+            } else {
+                String::new()
+            };
             let icon = if node.has_children {
                 if node.expanded { "▼ " } else { "▶ " }
             } else {
@@ -47,7 +53,10 @@ pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
                 _ => Style::default().fg(Color::White),
             };
 
+            let cursor = if selected == Some(i) { "│" } else { " " };
+
             let mut spans = vec![
+                Span::styled(cursor, Style::default().fg(Color::Cyan)),
                 Span::raw(indent),
                 Span::raw(icon),
                 Span::styled(node.label.clone(), style),
@@ -66,8 +75,7 @@ pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
             Style::default()
                 .bg(Color::DarkGray)
                 .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol("│ ");
+        );
 
     frame.render_stateful_widget(list, area, &mut app.sidebar_state);
 }
