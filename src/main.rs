@@ -7,13 +7,41 @@ mod tree;
 mod ui;
 mod vim;
 
+use std::fs;
+
 use color_eyre::Result;
 use ratatui::DefaultTerminal;
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+
+fn init_tracing() -> Result<()> {
+    let log_dir = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".config")
+        .join("lazydb");
+    fs::create_dir_all(&log_dir)?;
+    let log_file = fs::File::create(log_dir.join("debug.log"))?;
+
+    tracing_subscriber::registry()
+        .with(EnvFilter::new("lazydb=debug"))
+        .with(
+            fmt::layer()
+                .with_writer(log_file)
+                .with_ansi(false)
+                .with_timer(fmt::time::uptime()),
+        )
+        .init();
+
+    tracing::info!("debug mode enabled — logging to ~/.config/lazydb/debug.log");
+    Ok(())
+}
 
 fn main() -> Result<()> {
     color_eyre::install()?;
 
     let app_config = config::AppConfig::load()?;
+    if app_config.debug {
+        init_tracing()?;
+    }
     let profiles = config::Profiles::load()?;
 
     let terminal = ratatui::init();

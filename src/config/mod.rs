@@ -22,6 +22,8 @@ pub struct AppConfig {
     pub sidebar_width: u16,
     #[serde(default)]
     pub keybindings: KeybindingsConfig,
+    #[serde(default)]
+    pub debug: bool,
 }
 
 fn default_sidebar_width() -> u16 {
@@ -33,6 +35,7 @@ impl Default for AppConfig {
         Self {
             sidebar_width: default_sidebar_width(),
             keybindings: KeybindingsConfig::default(),
+            debug: false,
         }
     }
 }
@@ -59,7 +62,7 @@ pub struct Profiles {
     pub connections: BTreeMap<String, Connection>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
 pub enum Connection {
     #[serde(rename = "duckdb")]
@@ -68,14 +71,16 @@ pub enum Connection {
     Postgres(PostgresConnection),
     #[serde(rename = "clickhouse")]
     ClickHouse(ClickHouseConnection),
+    #[serde(rename = "snowflake")]
+    Snowflake(SnowflakeConnection),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct DuckDbConnection {
     pub path: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct PostgresConnection {
     pub host: String,
     #[serde(default = "default_pg_port")]
@@ -109,7 +114,7 @@ impl PostgresConnection {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ClickHouseConnection {
     #[serde(default = "default_clickhouse_url")]
     pub url: String,
@@ -133,12 +138,38 @@ fn default_clickhouse_database() -> String {
     "default".to_string()
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "auth")]
+pub enum SnowflakeAuth {
+    #[serde(rename = "password")]
+    Password { user: String, password: String },
+    #[serde(rename = "oauth")]
+    OAuth { oauth_token: String },
+    #[serde(rename = "browser")]
+    Browser { user: String },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SnowflakeConnection {
+    pub account: String,
+    #[serde(flatten)]
+    pub auth: SnowflakeAuth,
+    pub database: String,
+    #[serde(default)]
+    pub warehouse: Option<String>,
+    #[serde(default)]
+    pub schema: Option<String>,
+    #[serde(default)]
+    pub role: Option<String>,
+}
+
 impl Connection {
     pub fn type_name(&self) -> &'static str {
         match self {
             Connection::DuckDb(_) => "duckdb",
             Connection::Postgres(_) => "postgres",
             Connection::ClickHouse(_) => "clickhouse",
+            Connection::Snowflake(_) => "snowflake",
         }
     }
 }

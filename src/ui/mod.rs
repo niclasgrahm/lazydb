@@ -1,5 +1,6 @@
 mod editor;
 mod help;
+mod loading;
 mod message;
 mod results;
 mod sidebar;
@@ -52,4 +53,5 @@ pub fn draw(app: &mut App, frame: &mut Frame) {
 
     message::draw(app, frame);
     help::draw(app, frame);
+    loading::draw(app, frame);
 }

@@ -1,5 +1,6 @@
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyEventKind};
+use tracing::{debug, error, info};
 use ratatui::{
     layout::Rect,
     style::{Color, Style},
@@ -8,13 +9,16 @@ use ratatui::{
 use tui_textarea::{Input, TextArea};
 
 use std::collections::BTreeMap;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crate::config::{AppConfig, Connection, Profiles};
-use crate::db::{self, Database, SchemaNode};
+use crate::db::{self, Database, QueryResult, SchemaNode};
 use crate::db::clickhouse_backend::ClickHouse;
 use crate::db::duckdb_backend::DuckDb;
 use crate::db::postgres_backend::Postgres;
+use crate::db::snowflake_backend::Snowflake;
+use crate::config::SnowflakeAuth;
 use crate::keybindings::Keybindings;
 use crate::tree::TreeNode;
 use crate::vim::{self, Transition, Vim};
@@ -38,6 +42,17 @@ pub struct Message {
 }
 
 pub const RESULTS_PAGE_SIZE: usize = 100;
+
+pub enum BgResult {
+    Connected {
+        label: String,
+        result: Result<(Box<dyn Database>, Vec<SchemaNode>), String>,
+    },
+    Query {
+        conn: Box<dyn Database>,
+        result: Result<(QueryResult, Duration, bool), String>,
+    },
+}
 
 pub struct App<'a> {
     pub sidebar_items: Vec<TreeNode>,
@@ -64,6 +79,9 @@ pub struct App<'a> {
     pub results_has_more: bool,
     results_query: Option<String>,
     pub results_area: Rect,
+    pub loading: Option<String>,
+    pub spinner_tick: usize,
+    bg_receiver: Option<mpsc::Receiver<BgResult>>,
 }
 
 impl<'a> App<'a> {
@@ -104,6 +122,9 @@ impl<'a> App<'a> {
             results_has_more: false,
             results_query: None,
             results_area: Rect::default(),
+            loading: None,
+            spinner_tick: 0,
+            bg_receiver: None,
         }
     }
 
@@ -146,17 +167,17 @@ impl<'a> App<'a> {
         if query.trim().is_empty() {
             return;
         }
+        info!(query = query.trim(), "executing query");
         self.results_query = Some(query.trim().to_string());
         self.results_page = 0;
         self.results_scroll_row = 0;
         self.results_scroll_col = 0;
         self.run_paged_query();
-        self.refresh_schema();
     }
 
     fn run_paged_query(&mut self) {
         let Some(query) = &self.results_query else { return };
-        let Some(conn) = self.connection.as_mut() else {
+        let Some(mut conn) = self.connection.take() else {
             self.show_error("No database connected");
             return;
         };
@@ -165,20 +186,29 @@ impl<'a> App<'a> {
             "SELECT * FROM ({query}) AS _lazydb_q LIMIT {limit} OFFSET {offset}",
             limit = RESULTS_PAGE_SIZE + 1,
         );
-        let start = Instant::now();
-        match conn.execute_query(&paged) {
-            Ok(mut result) => {
-                self.query_duration = Some(start.elapsed());
-                self.results_has_more = result.rows.len() > RESULTS_PAGE_SIZE;
-                if self.results_has_more {
-                    result.rows.truncate(RESULTS_PAGE_SIZE);
+
+        debug!(page = self.results_page, offset, "running paged query");
+
+        let (tx, rx) = mpsc::channel();
+        self.bg_receiver = Some(rx);
+        self.loading = Some("Executing query…".into());
+        self.spinner_tick = 0;
+
+        std::thread::spawn(move || {
+            let start = Instant::now();
+            let result = match conn.execute_query(&paged) {
+                Ok(mut result) => {
+                    let duration = start.elapsed();
+                    let has_more = result.rows.len() > RESULTS_PAGE_SIZE;
+                    if has_more {
+                        result.rows.truncate(RESULTS_PAGE_SIZE);
+                    }
+                    Ok((result, duration, has_more))
                 }
-                self.query_result = Some(result);
-                self.results_visible = true;
-                self.focus = Focus::Results;
-            }
-            Err(e) => self.show_error(format!("Query error: {e}")),
-        }
+                Err(e) => Err(e),
+            };
+            let _ = tx.send(BgResult::Query { conn, result });
+        });
     }
 
     pub fn results_next_page(&mut self) {
@@ -200,9 +230,29 @@ impl<'a> App<'a> {
     }
 
     pub fn handle_event(&mut self) -> Result<()> {
+        self.poll_background();
+
+        let poll_timeout = if self.loading.is_some() {
+            Duration::from_millis(80)
+        } else {
+            Duration::from_secs(1)
+        };
+
+        if !event::poll(poll_timeout)? {
+            if self.loading.is_some() {
+                self.spinner_tick = self.spinner_tick.wrapping_add(1);
+            }
+            return Ok(());
+        }
+
         let event = event::read()?;
         if let Event::Key(key) = &event {
             if key.kind != KeyEventKind::Press {
+                return Ok(());
+            }
+
+            // While loading, only allow quit
+            if self.loading.is_some() {
                 return Ok(());
             }
 
@@ -392,6 +442,7 @@ impl<'a> App<'a> {
 
         if self.connected_db.as_ref() == Some(&label) {
             // Disconnect: drop connection, clear schema, collapse
+            info!(label = %label, "disconnecting from database");
             self.connection = None;
             self.connected_db = None;
             self.clear_schema(&label);
@@ -410,54 +461,93 @@ impl<'a> App<'a> {
                 }
             }
 
-            // Look up profile and connect
+            // Look up profile and connect in background
             let profile_key = self.label_to_profile.get(&label).cloned();
             let profile = profile_key
                 .as_ref()
-                .and_then(|k| self.profiles.connections.get(k));
+                .and_then(|k| self.profiles.connections.get(k))
+                .cloned();
 
             if let Some(profile) = profile {
-                let result: Result<Box<dyn Database>, String> = match profile {
-                    Connection::DuckDb(cfg) => {
-                        DuckDb::connect(&cfg.path).map(|db| Box::new(db) as Box<dyn Database>)
-                    }
-                    Connection::Postgres(cfg) => {
-                        Postgres::connect(&cfg.connection_string(), cfg.schema_name())
-                            .map(|db| Box::new(db) as Box<dyn Database>)
-                    }
-                    Connection::ClickHouse(cfg) => {
-                        ClickHouse::connect(
-                            &cfg.url,
-                            &cfg.database,
-                            &cfg.user,
-                            cfg.password.as_deref(),
-                        )
-                        .map(|db| Box::new(db) as Box<dyn Database>)
-                    }
-                };
+                info!(label = %label, "connecting to database");
+                let (tx, rx) = mpsc::channel();
+                self.bg_receiver = Some(rx);
+                self.loading = Some("Connecting…".into());
+                self.spinner_tick = 0;
 
-                match result {
-                    Ok(mut db) => {
-                        match db.schema_tree() {
-                            Ok(tree) => self.populate_schema(&label, tree),
-                            Err(e) => self.show_error(format!("Schema error: {e}")),
+                let label_clone = label.clone();
+                std::thread::spawn(move || {
+                    let result = Self::connect_profile(&profile);
+                    let result = match result {
+                        Ok(mut db) => {
+                            let schema = db.schema_tree().unwrap_or_default();
+                            Ok((db, schema))
                         }
-                        self.connection = Some(db);
-                        self.connected_db = Some(label.clone());
-                    }
-                    Err(e) => {
-                        self.show_error(format!("Connection failed: {e}"));
-                        return;
-                    }
-                }
+                        Err(e) => Err(e),
+                    };
+                    let _ = tx.send(BgResult::Connected {
+                        label: label_clone,
+                        result,
+                    });
+                });
             }
+        }
+    }
 
-            // Expand the connection node
-            let new_flat = TreeNode::flatten_all(&self.sidebar_items);
-            if let Some(new_idx) = new_flat.iter().position(|n| n.label == label) {
-                TreeNode::toggle_at_index(&mut self.sidebar_items, new_idx);
-                self.sidebar_state.select(Some(new_idx));
+    fn connect_profile(profile: &Connection) -> Result<Box<dyn Database>, String> {
+        match profile {
+            Connection::DuckDb(cfg) => {
+                DuckDb::connect(&cfg.path).map(|db| Box::new(db) as Box<dyn Database>)
             }
+            Connection::Postgres(cfg) => {
+                Postgres::connect(&cfg.connection_string(), cfg.schema_name())
+                    .map(|db| Box::new(db) as Box<dyn Database>)
+            }
+            Connection::ClickHouse(cfg) => {
+                ClickHouse::connect(
+                    &cfg.url,
+                    &cfg.database,
+                    &cfg.user,
+                    cfg.password.as_deref(),
+                )
+                .map(|db| Box::new(db) as Box<dyn Database>)
+            }
+            Connection::Snowflake(cfg) => match &cfg.auth {
+                SnowflakeAuth::Password { user, password } => {
+                    Snowflake::connect_password(
+                        &cfg.account,
+                        user,
+                        password,
+                        &cfg.database,
+                        cfg.warehouse.as_deref(),
+                        cfg.schema.as_deref(),
+                        cfg.role.as_deref(),
+                    )
+                    .map(|db| Box::new(db) as Box<dyn Database>)
+                }
+                SnowflakeAuth::OAuth { oauth_token } => {
+                    Snowflake::connect_oauth(
+                        &cfg.account,
+                        oauth_token,
+                        &cfg.database,
+                        cfg.warehouse.as_deref(),
+                        cfg.schema.as_deref(),
+                        cfg.role.as_deref(),
+                    )
+                    .map(|db| Box::new(db) as Box<dyn Database>)
+                }
+                SnowflakeAuth::Browser { user } => {
+                    Snowflake::connect_browser(
+                        &cfg.account,
+                        user,
+                        &cfg.database,
+                        cfg.warehouse.as_deref(),
+                        cfg.schema.as_deref(),
+                        cfg.role.as_deref(),
+                    )
+                    .map(|db| Box::new(db) as Box<dyn Database>)
+                }
+            },
         }
     }
 
@@ -465,19 +555,31 @@ impl<'a> App<'a> {
         let flat = TreeNode::flatten_all(&self.sidebar_items);
         let Some(node) = flat.get(flat_index) else { return };
 
-        // Find the nearest ancestor whose label is "Tables" or "Views"
-        let parent_label = flat[..flat_index]
-            .iter()
-            .rev()
-            .find(|n| n.depth < node.depth)
-            .map(|n| n.label.as_str());
+        // Collect ancestors by walking backwards through nodes with decreasing depth
+        let mut ancestors: Vec<&str> = Vec::new();
+        let mut target_depth = node.depth;
+        for ancestor in flat[..flat_index].iter().rev() {
+            if ancestor.depth < target_depth {
+                ancestors.push(&ancestor.label);
+                target_depth = ancestor.depth;
+                if target_depth == 0 {
+                    break;
+                }
+            }
+        }
 
-        if !matches!(parent_label, Some("Tables" | "Views")) {
+        // Ancestors are in reverse order (innermost first): [Tables/Views, schema, database, connection]
+        // Check that the immediate parent is "Tables" or "Views"
+        if !matches!(ancestors.first().map(|s| s.as_ref()), Some("Tables" | "Views")) {
             return;
         }
 
-        let table_name = &node.label;
-        let query = format!("SELECT * FROM {table_name} LIMIT 10");
+        // Build fully qualified name: database.schema.table
+        // ancestors = [Tables/Views, schema, database, connection]
+        let table_name = node.label.as_str();
+        let schema_name = ancestors.get(1).copied().unwrap_or(table_name);
+        let db_name = ancestors.get(2).copied().unwrap_or(schema_name);
+        let query = format!("SELECT * FROM {db_name}.{schema_name}.{table_name} LIMIT 10");
 
         // Clear editor and insert the query
         self.editor.select_all();
@@ -487,12 +589,82 @@ impl<'a> App<'a> {
         self.vim = Vim::new(vim::Mode::Normal);
     }
 
+    fn poll_background(&mut self) {
+        let result = match &self.bg_receiver {
+            Some(rx) => match rx.try_recv() {
+                Ok(result) => result,
+                Err(mpsc::TryRecvError::Empty) => return,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    error!("background task channel disconnected unexpectedly");
+                    self.loading = None;
+                    self.bg_receiver = None;
+                    self.show_error("Background task failed unexpectedly");
+                    return;
+                }
+            },
+            None => return,
+        };
+
+        self.loading = None;
+        self.bg_receiver = None;
+
+        match result {
+            BgResult::Connected { label, result } => match result {
+                Ok((db, schema)) => {
+                    info!(label = %label, schema_nodes = schema.len(), "connection established successfully");
+                    self.populate_schema(&label, schema);
+                    self.connection = Some(db);
+                    self.connected_db = Some(label.clone());
+                    // Expand the connection node
+                    let new_flat = TreeNode::flatten_all(&self.sidebar_items);
+                    if let Some(new_idx) = new_flat.iter().position(|n| n.label == label) {
+                        TreeNode::toggle_at_index(&mut self.sidebar_items, new_idx);
+                        self.sidebar_state.select(Some(new_idx));
+                    }
+                }
+                Err(e) => {
+                    error!(label = %label, error = %e, "connection failed");
+                    self.show_error(format!("Connection failed: {e}"));
+                }
+            },
+            BgResult::Query { conn, result } => {
+                self.connection = Some(conn);
+                match result {
+                    Ok((query_result, duration, has_more)) => {
+                        info!(
+                            rows = query_result.rows.len(),
+                            columns = query_result.columns.len(),
+                            duration_ms = duration.as_millis(),
+                            has_more,
+                            "query completed"
+                        );
+                        self.query_duration = Some(duration);
+                        self.results_has_more = has_more;
+                        self.query_result = Some(query_result);
+                        self.results_visible = true;
+                        self.focus = Focus::Results;
+                    }
+                    Err(e) => {
+                        error!(error = %e, "query failed");
+                        self.show_error(format!("Query error: {e}"));
+                    }
+                }
+            }
+        }
+    }
+
     fn refresh_schema(&mut self) {
         let Some(label) = self.connected_db.clone() else { return };
         let Some(conn) = self.connection.as_mut() else { return };
+        debug!(label = %label, "refreshing schema tree");
         match conn.schema_tree() {
-            Ok(tree) => self.populate_schema(&label, tree),
-            Err(_) => {} // silent — don't interrupt the user's query result
+            Ok(tree) => {
+                debug!(label = %label, nodes = tree.len(), "schema tree refreshed");
+                self.populate_schema(&label, tree);
+            }
+            Err(e) => {
+                debug!(label = %label, error = %e, "schema refresh failed (silent)");
+            }
         }
     }
 

@@ -1,6 +1,7 @@
 pub mod clickhouse_backend;
 pub mod duckdb_backend;
 pub mod postgres_backend;
+pub mod snowflake_backend;
 
 use std::fmt;
 
@@ -50,7 +51,7 @@ impl SchemaNode {
 }
 
 /// Trait that all database backends implement.
-pub trait Database {
+pub trait Database: Send {
     fn execute_query(&mut self, sql: &str) -> Result<QueryResult, String>;
     fn schema_tree(&mut self) -> Result<Vec<SchemaNode>, String>;
 }
