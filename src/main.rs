@@ -1,4 +1,5 @@
 mod app;
+mod cli;
 mod config;
 mod db;
 mod highlight;
@@ -9,6 +10,7 @@ mod vim;
 
 use std::fs;
 
+use clap::Parser;
 use color_eyre::Result;
 use ratatui::DefaultTerminal;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
@@ -37,6 +39,12 @@ fn init_tracing() -> Result<()> {
 
 fn main() -> Result<()> {
     color_eyre::install()?;
+
+    let cli = cli::Cli::parse();
+
+    if let Some(cmd) = cli.command {
+        return cli::handle(cmd);
+    }
 
     let app_config = config::AppConfig::load()?;
     if app_config.debug {

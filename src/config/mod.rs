@@ -5,6 +5,11 @@ use std::path::PathBuf;
 use color_eyre::eyre::{Context, Result};
 use serde::Deserialize;
 
+use crate::db::clickhouse_backend::ClickHouse;
+use crate::db::duckdb_backend::DuckDb;
+use crate::db::postgres_backend::Postgres;
+use crate::db::snowflake_backend::Snowflake;
+use crate::db::Database;
 use crate::keybindings::KeybindingsConfig;
 
 fn config_dir() -> PathBuf {
@@ -170,6 +175,52 @@ impl Connection {
             Connection::Postgres(_) => "postgres",
             Connection::ClickHouse(_) => "clickhouse",
             Connection::Snowflake(_) => "snowflake",
+        }
+    }
+
+    pub fn connect(&self) -> Result<Box<dyn Database>, String> {
+        match self {
+            Connection::DuckDb(cfg) => {
+                DuckDb::connect(&cfg.path).map(|db| Box::new(db) as Box<dyn Database>)
+            }
+            Connection::Postgres(cfg) => {
+                Postgres::connect(&cfg.connection_string(), cfg.schema_name())
+                    .map(|db| Box::new(db) as Box<dyn Database>)
+            }
+            Connection::ClickHouse(cfg) => {
+                ClickHouse::connect(&cfg.url, &cfg.database, &cfg.user, cfg.password.as_deref())
+                    .map(|db| Box::new(db) as Box<dyn Database>)
+            }
+            Connection::Snowflake(cfg) => match &cfg.auth {
+                SnowflakeAuth::Password { user, password } => Snowflake::connect_password(
+                    &cfg.account,
+                    user,
+                    password,
+                    &cfg.database,
+                    cfg.warehouse.as_deref(),
+                    cfg.schema.as_deref(),
+                    cfg.role.as_deref(),
+                )
+                .map(|db| Box::new(db) as Box<dyn Database>),
+                SnowflakeAuth::OAuth { oauth_token } => Snowflake::connect_oauth(
+                    &cfg.account,
+                    oauth_token,
+                    &cfg.database,
+                    cfg.warehouse.as_deref(),
+                    cfg.schema.as_deref(),
+                    cfg.role.as_deref(),
+                )
+                .map(|db| Box::new(db) as Box<dyn Database>),
+                SnowflakeAuth::Browser { user } => Snowflake::connect_browser(
+                    &cfg.account,
+                    user,
+                    &cfg.database,
+                    cfg.warehouse.as_deref(),
+                    cfg.schema.as_deref(),
+                    cfg.role.as_deref(),
+                )
+                .map(|db| Box::new(db) as Box<dyn Database>),
+            },
         }
     }
 }
