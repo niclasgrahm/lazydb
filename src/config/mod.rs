@@ -195,3 +195,241 @@ impl Profiles {
         Ok(profiles)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_duckdb_profile() {
+        let toml = r#"
+            [connections.mydb]
+            type = "duckdb"
+            path = "/tmp/test.duckdb"
+        "#;
+        let profiles: Profiles = toml::from_str(toml).unwrap();
+        assert!(matches!(
+            profiles.connections.get("mydb"),
+            Some(Connection::DuckDb(DuckDbConnection { path })) if path == "/tmp/test.duckdb"
+        ));
+    }
+
+    #[test]
+    fn parse_postgres_full() {
+        let toml = r#"
+            [connections.pg]
+            type = "postgres"
+            host = "db.example.com"
+            port = 5433
+            user = "admin"
+            password = "secret"
+            database = "analytics"
+            schema = "reporting"
+        "#;
+        let profiles: Profiles = toml::from_str(toml).unwrap();
+        let conn = profiles.connections.get("pg").unwrap();
+        match conn {
+            Connection::Postgres(pg) => {
+                assert_eq!(pg.host, "db.example.com");
+                assert_eq!(pg.port, 5433);
+                assert_eq!(pg.user, "admin");
+                assert_eq!(pg.password.as_deref(), Some("secret"));
+                assert_eq!(pg.database, "analytics");
+                assert_eq!(pg.schema.as_deref(), Some("reporting"));
+            }
+            _ => panic!("expected Postgres"),
+        }
+    }
+
+    #[test]
+    fn parse_postgres_defaults() {
+        let toml = r#"
+            [connections.pg]
+            type = "postgres"
+            host = "localhost"
+            user = "test"
+            database = "testdb"
+        "#;
+        let profiles: Profiles = toml::from_str(toml).unwrap();
+        match profiles.connections.get("pg").unwrap() {
+            Connection::Postgres(pg) => {
+                assert_eq!(pg.port, 5432);
+                assert_eq!(pg.password, None);
+                assert_eq!(pg.schema, None);
+            }
+            _ => panic!("expected Postgres"),
+        }
+    }
+
+    #[test]
+    fn connection_string_with_password() {
+        let pg = PostgresConnection {
+            host: "localhost".into(),
+            port: 5432,
+            user: "admin".into(),
+            password: Some("secret".into()),
+            database: "mydb".into(),
+            schema: None,
+        };
+        let s = pg.connection_string();
+        assert!(s.contains("host=localhost"));
+        assert!(s.contains("port=5432"));
+        assert!(s.contains("user=admin"));
+        assert!(s.contains("dbname=mydb"));
+        assert!(s.contains("password=secret"));
+    }
+
+    #[test]
+    fn connection_string_without_password() {
+        let pg = PostgresConnection {
+            host: "localhost".into(),
+            port: 5432,
+            user: "admin".into(),
+            password: None,
+            database: "mydb".into(),
+            schema: None,
+        };
+        let s = pg.connection_string();
+        assert!(!s.contains("password"));
+    }
+
+    #[test]
+    fn schema_name_default() {
+        let pg = PostgresConnection {
+            host: "localhost".into(),
+            port: 5432,
+            user: "test".into(),
+            password: None,
+            database: "db".into(),
+            schema: None,
+        };
+        assert_eq!(pg.schema_name(), "public");
+    }
+
+    #[test]
+    fn schema_name_custom() {
+        let pg = PostgresConnection {
+            host: "localhost".into(),
+            port: 5432,
+            user: "test".into(),
+            password: None,
+            database: "db".into(),
+            schema: Some("reporting".into()),
+        };
+        assert_eq!(pg.schema_name(), "reporting");
+    }
+
+    #[test]
+    fn parse_clickhouse_defaults() {
+        let toml = r#"
+            [connections.ch]
+            type = "clickhouse"
+        "#;
+        let profiles: Profiles = toml::from_str(toml).unwrap();
+        match profiles.connections.get("ch").unwrap() {
+            Connection::ClickHouse(ch) => {
+                assert_eq!(ch.url, "http://localhost:8123");
+                assert_eq!(ch.user, "default");
+                assert_eq!(ch.database, "default");
+                assert_eq!(ch.password, None);
+            }
+            _ => panic!("expected ClickHouse"),
+        }
+    }
+
+    #[test]
+    fn parse_snowflake_password_auth() {
+        let toml = r#"
+            [connections.sf]
+            type = "snowflake"
+            account = "xy12345"
+            auth = "password"
+            user = "user@example.com"
+            password = "pw"
+            database = "PROD"
+        "#;
+        let profiles: Profiles = toml::from_str(toml).unwrap();
+        match profiles.connections.get("sf").unwrap() {
+            Connection::Snowflake(sf) => {
+                assert_eq!(sf.account, "xy12345");
+                assert_eq!(sf.database, "PROD");
+                assert!(matches!(&sf.auth, SnowflakeAuth::Password { user, .. } if user == "user@example.com"));
+            }
+            _ => panic!("expected Snowflake"),
+        }
+    }
+
+    #[test]
+    fn parse_snowflake_oauth_auth() {
+        let toml = r#"
+            [connections.sf]
+            type = "snowflake"
+            account = "xy12345"
+            auth = "oauth"
+            oauth_token = "tok123"
+            database = "PROD"
+        "#;
+        let profiles: Profiles = toml::from_str(toml).unwrap();
+        match profiles.connections.get("sf").unwrap() {
+            Connection::Snowflake(sf) => {
+                assert!(matches!(&sf.auth, SnowflakeAuth::OAuth { oauth_token } if oauth_token == "tok123"));
+            }
+            _ => panic!("expected Snowflake"),
+        }
+    }
+
+    #[test]
+    fn parse_snowflake_browser_auth() {
+        let toml = r#"
+            [connections.sf]
+            type = "snowflake"
+            account = "xy12345"
+            auth = "browser"
+            user = "user@example.com"
+            database = "PROD"
+        "#;
+        let profiles: Profiles = toml::from_str(toml).unwrap();
+        match profiles.connections.get("sf").unwrap() {
+            Connection::Snowflake(sf) => {
+                assert!(matches!(&sf.auth, SnowflakeAuth::Browser { user } if user == "user@example.com"));
+            }
+            _ => panic!("expected Snowflake"),
+        }
+    }
+
+    #[test]
+    fn type_name_variants() {
+        let duckdb = Connection::DuckDb(DuckDbConnection { path: "x".into() });
+        assert_eq!(duckdb.type_name(), "duckdb");
+
+        let pg = Connection::Postgres(PostgresConnection {
+            host: "h".into(), port: 5432, user: "u".into(),
+            password: None, database: "d".into(), schema: None,
+        });
+        assert_eq!(pg.type_name(), "postgres");
+
+        let ch = Connection::ClickHouse(ClickHouseConnection {
+            url: "u".into(), user: "u".into(), password: None, database: "d".into(),
+        });
+        assert_eq!(ch.type_name(), "clickhouse");
+
+        let sf = Connection::Snowflake(SnowflakeConnection {
+            account: "a".into(),
+            auth: SnowflakeAuth::Browser { user: "u".into() },
+            database: "d".into(), warehouse: None, schema: None, role: None,
+        });
+        assert_eq!(sf.type_name(), "snowflake");
+    }
+
+    #[test]
+    fn malformed_toml_missing_required_field() {
+        let toml = r#"
+            [connections.pg]
+            type = "postgres"
+            host = "localhost"
+        "#;
+        // Missing user and database fields
+        let result: Result<Profiles, _> = toml::from_str(toml);
+        assert!(result.is_err());
+    }
+}

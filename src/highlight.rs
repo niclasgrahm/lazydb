@@ -140,3 +140,97 @@ pub fn highlight_line(line: &str) -> Vec<HlSpan> {
 
     spans
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn span_texts(line: &str) -> Vec<String> {
+        highlight_line(line).into_iter().map(|s| s.text).collect()
+    }
+
+    fn span_styles(line: &str) -> Vec<Style> {
+        highlight_line(line).into_iter().map(|s| s.style).collect()
+    }
+
+    #[test]
+    fn keyword_highlighted() {
+        let spans = highlight_line("SELECT");
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].text, "SELECT");
+        assert_eq!(spans[0].style, STYLE_KEYWORD);
+    }
+
+    #[test]
+    fn keyword_case_insensitive() {
+        let spans = highlight_line("select");
+        assert_eq!(spans[0].style, STYLE_KEYWORD);
+    }
+
+    #[test]
+    fn function_highlighted() {
+        let spans = highlight_line("COUNT");
+        assert_eq!(spans[0].style, STYLE_FUNCTION);
+    }
+
+    #[test]
+    fn string_literal() {
+        let spans = highlight_line("'hello'");
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].text, "'hello'");
+        assert_eq!(spans[0].style, STYLE_STRING);
+    }
+
+    #[test]
+    fn escaped_quote_in_string() {
+        let spans = highlight_line("'it''s'");
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].text, "'it''s'");
+        assert_eq!(spans[0].style, STYLE_STRING);
+    }
+
+    #[test]
+    fn number_integer() {
+        let spans = highlight_line("42");
+        assert_eq!(spans[0].text, "42");
+        assert_eq!(spans[0].style, STYLE_NUMBER);
+    }
+
+    #[test]
+    fn number_decimal() {
+        let spans = highlight_line("3.14");
+        assert_eq!(spans[0].text, "3.14");
+        assert_eq!(spans[0].style, STYLE_NUMBER);
+    }
+
+    #[test]
+    fn line_comment() {
+        let spans = highlight_line("-- this is a comment");
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].style, STYLE_COMMENT);
+    }
+
+    #[test]
+    fn multi_char_operator() {
+        let spans = highlight_line("!=");
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].text, "!=");
+        assert_eq!(spans[0].style, STYLE_OPERATOR);
+
+        let spans = highlight_line(">=");
+        assert_eq!(spans[0].text, ">=");
+
+        let spans = highlight_line("::");
+        assert_eq!(spans[0].text, "::");
+    }
+
+    #[test]
+    fn mixed_line() {
+        let texts = span_texts("SELECT * FROM users WHERE id = 1");
+        assert!(texts.contains(&"SELECT".to_string()));
+        assert!(texts.contains(&"FROM".to_string()));
+        assert!(texts.contains(&"WHERE".to_string()));
+        assert!(texts.contains(&"users".to_string()));
+        assert!(texts.contains(&"1".to_string()));
+    }
+}

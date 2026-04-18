@@ -390,4 +390,136 @@ mod tests {
         assert_eq!(Mode::Visual.to_string(), "VISUAL");
         assert_eq!(Mode::Operator('d').to_string(), "OPERATOR(d)");
     }
+
+    #[test]
+    fn operator_dd_deletes_line() {
+        let vim = Vim::new(Mode::Normal);
+        let mut ta = TextArea::default();
+        ta.insert_str("hello\nworld");
+        ta.move_cursor(tui_textarea::CursorMove::Top);
+
+        // d enters Operator mode
+        let vim = match vim.transition(key_input('d'), &mut ta) {
+            Transition::Mode(Mode::Operator('d')) => Vim::new(Mode::Operator('d')),
+            _ => panic!("expected operator(d) mode"),
+        };
+        // dd deletes the line
+        match vim.transition(key_input('d'), &mut ta) {
+            Transition::Mode(Mode::Normal) => {}
+            _ => panic!("expected normal mode after dd"),
+        }
+        // First line should be deleted
+        assert_eq!(ta.lines().len(), 1);
+    }
+
+    #[test]
+    fn operator_yy_copies_line() {
+        let vim = Vim::new(Mode::Normal);
+        let mut ta = TextArea::default();
+        ta.insert_str("hello\nworld");
+        ta.move_cursor(tui_textarea::CursorMove::Top);
+
+        // y enters Operator mode
+        let vim = match vim.transition(key_input('y'), &mut ta) {
+            Transition::Mode(Mode::Operator('y')) => Vim::new(Mode::Operator('y')),
+            _ => panic!("expected operator(y) mode"),
+        };
+        // yy copies the line
+        match vim.transition(key_input('y'), &mut ta) {
+            Transition::Mode(Mode::Normal) => {}
+            _ => panic!("expected normal mode after yy"),
+        }
+        // Text unchanged, can paste
+        assert_eq!(ta.lines().len(), 2);
+        ta.move_cursor(tui_textarea::CursorMove::Bottom);
+        ta.move_cursor(tui_textarea::CursorMove::End);
+        ta.paste();
+        assert!(ta.lines().len() > 2);
+    }
+
+    #[test]
+    fn visual_mode_delete() {
+        let vim = Vim::new(Mode::Insert);
+        let mut ta = TextArea::default();
+        // Type some text
+        vim.transition(key_input('A'), &mut ta);
+        vim.transition(key_input('B'), &mut ta);
+        vim.transition(key_input('C'), &mut ta);
+        assert_eq!(ta.lines(), &["ABC"]);
+
+        // Go to normal mode
+        let vim = Vim::new(Mode::Normal);
+        // Move to beginning
+        ta.move_cursor(tui_textarea::CursorMove::Head);
+
+        // Enter visual mode
+        let vim = match vim.transition(key_input('v'), &mut ta) {
+            Transition::Mode(Mode::Visual) => Vim::new(Mode::Visual),
+            _ => panic!("expected visual mode"),
+        };
+        // Move right to select 'A'
+        ta.move_cursor(tui_textarea::CursorMove::Forward);
+        // Delete selection
+        match vim.transition(key_input('d'), &mut ta) {
+            Transition::Mode(Mode::Normal) => {}
+            _ => panic!("expected normal mode after delete"),
+        }
+        // Some text should be deleted
+        assert!(ta.lines()[0].len() < 3);
+    }
+
+    #[test]
+    fn undo_restores_text() {
+        let vim = Vim::new(Mode::Insert);
+        let mut ta = TextArea::default();
+        vim.transition(key_input('h'), &mut ta);
+        vim.transition(key_input('i'), &mut ta);
+        assert_eq!(ta.lines(), &["hi"]);
+
+        // Normal mode, undo
+        let vim = Vim::new(Mode::Normal);
+        vim.transition(
+            Input {
+                key: Key::Char('u'),
+                ctrl: false,
+                alt: false,
+                shift: false,
+            },
+            &mut ta,
+        );
+        // After undo, text should be shorter or empty
+        assert_ne!(ta.lines(), &["hi"]);
+    }
+
+    #[test]
+    fn normal_x_deletes_char() {
+        let vim = Vim::new(Mode::Insert);
+        let mut ta = TextArea::default();
+        vim.transition(key_input('A'), &mut ta);
+        vim.transition(key_input('B'), &mut ta);
+        assert_eq!(ta.lines(), &["AB"]);
+
+        let vim = Vim::new(Mode::Normal);
+        ta.move_cursor(tui_textarea::CursorMove::Head);
+        vim.transition(key_input('x'), &mut ta);
+        assert_eq!(ta.lines(), &["B"]);
+    }
+
+    #[test]
+    fn gg_moves_to_top() {
+        let vim = Vim::new(Mode::Normal);
+        let mut ta = TextArea::default();
+        ta.insert_str("line1\nline2\nline3");
+        // Cursor should be at end
+        assert_eq!(ta.cursor().0, 2);
+
+        // First g returns Pending
+        let vim = match vim.transition(key_input('g'), &mut ta) {
+            Transition::Pending(input) => Vim::new(Mode::Normal).with_pending(input),
+            _ => panic!("expected pending"),
+        };
+        // Second g moves to top
+        vim.transition(key_input('g'), &mut ta);
+        assert_eq!(ta.cursor().0, 0);
+    }
 }

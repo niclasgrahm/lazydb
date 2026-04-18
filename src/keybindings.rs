@@ -262,3 +262,99 @@ impl Keybindings {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_single_char() {
+        let kb = KeyBind::parse("q");
+        assert_eq!(kb.code, KeyCode::Char('q'));
+        assert_eq!(kb.modifiers, KeyModifiers::empty());
+    }
+
+    #[test]
+    fn parse_ctrl_modifier() {
+        let kb = KeyBind::parse("ctrl+e");
+        assert_eq!(kb.code, KeyCode::Char('e'));
+        assert!(kb.modifiers.contains(KeyModifiers::CONTROL));
+    }
+
+    #[test]
+    fn parse_shift_tab_becomes_backtab() {
+        let kb = KeyBind::parse("shift+tab");
+        assert_eq!(kb.code, KeyCode::BackTab);
+        assert!(!kb.modifiers.contains(KeyModifiers::SHIFT));
+    }
+
+    #[test]
+    fn parse_special_keys() {
+        assert_eq!(KeyBind::parse("enter").code, KeyCode::Enter);
+        assert_eq!(KeyBind::parse("esc").code, KeyCode::Esc);
+        assert_eq!(KeyBind::parse("escape").code, KeyCode::Esc);
+        assert_eq!(KeyBind::parse("up").code, KeyCode::Up);
+        assert_eq!(KeyBind::parse("down").code, KeyCode::Down);
+        assert_eq!(KeyBind::parse("left").code, KeyCode::Left);
+        assert_eq!(KeyBind::parse("right").code, KeyCode::Right);
+        assert_eq!(KeyBind::parse("pageup").code, KeyCode::PageUp);
+        assert_eq!(KeyBind::parse("pagedown").code, KeyCode::PageDown);
+        assert_eq!(KeyBind::parse("space").code, KeyCode::Char(' '));
+        assert_eq!(KeyBind::parse("tab").code, KeyCode::Tab);
+        assert_eq!(KeyBind::parse("backspace").code, KeyCode::Backspace);
+    }
+
+    #[test]
+    fn parse_unknown_key() {
+        assert_eq!(KeyBind::parse("nonexistent").code, KeyCode::Null);
+    }
+
+    #[test]
+    fn action_matches_single() {
+        let action = Action::from_config(&KeyInput::Single("q".into()));
+        let event = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::empty());
+        assert!(action.matches(&event));
+    }
+
+    #[test]
+    fn action_matches_any_alternative() {
+        let action = Action::from_config(&KeyInput::Multiple(vec!["k".into(), "up".into()]));
+        let k_event = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty());
+        let up_event = KeyEvent::new(KeyCode::Up, KeyModifiers::empty());
+        assert!(action.matches(&k_event));
+        assert!(action.matches(&up_event));
+    }
+
+    #[test]
+    fn action_no_match() {
+        let action = Action::from_config(&KeyInput::Single("q".into()));
+        let event = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::empty());
+        assert!(!action.matches(&event));
+    }
+
+    #[test]
+    fn action_from_config_single() {
+        let action = Action::from_config(&KeyInput::Single("ctrl+e".into()));
+        assert_eq!(action.keys.len(), 1);
+        assert_eq!(action.display, "ctrl+e");
+    }
+
+    #[test]
+    fn action_from_config_multiple() {
+        let action = Action::from_config(&KeyInput::Multiple(vec!["k".into(), "up".into()]));
+        assert_eq!(action.keys.len(), 2);
+        assert_eq!(action.display, "k/up");
+    }
+
+    #[test]
+    fn default_keybindings_resolve() {
+        let kb = Keybindings::from_config(KeybindingsConfig::default());
+        // Verify all actions have at least one key
+        assert!(!kb.global.execute_query.keys.is_empty());
+        assert!(!kb.global.next_pane.keys.is_empty());
+        assert!(!kb.sidebar.navigate_up.keys.is_empty());
+        assert!(!kb.sidebar.quit.keys.is_empty());
+        assert!(!kb.results.scroll_down.keys.is_empty());
+        assert!(!kb.results.quit.keys.is_empty());
+    }
+}

@@ -20,6 +20,22 @@ impl Postgres {
 
 impl Database for Postgres {
     fn execute_query(&mut self, sql: &str) -> Result<QueryResult, String> {
+        // For non-SELECT statements, use execute() which doesn't expect rows
+        let trimmed = sql.trim_start().to_ascii_uppercase();
+        let is_row_returning = trimmed.starts_with("SELECT")
+            || trimmed.starts_with("WITH")
+            || trimmed.starts_with("TABLE ")
+            || trimmed.starts_with("VALUES")
+            || trimmed.contains("RETURNING");
+
+        if !is_row_returning {
+            let affected = self.client.execute(sql, &[]).map_err(|e| e.to_string())?;
+            return Ok(QueryResult {
+                columns: vec!["result".into()],
+                rows: vec![vec![Value::Text(format!("{affected} row(s) affected"))]],
+            });
+        }
+
         let rows = self.client.query(sql, &[]).map_err(|e| e.to_string())?;
 
         if rows.is_empty() {

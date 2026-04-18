@@ -11,6 +11,8 @@ pub struct FlatNode {
     pub depth: u16,
     pub expanded: bool,
     pub has_children: bool,
+    /// Index in the unfiltered flat list (used to map filtered selection back to tree operations).
+    pub flat_index: usize,
 }
 
 impl TreeNode {
@@ -38,27 +40,80 @@ impl TreeNode {
         }
     }
 
-    pub fn flatten(&self, depth: u16) -> Vec<FlatNode> {
-        let mut result = vec![FlatNode {
+    fn flatten_inner(&self, depth: u16, counter: &mut usize, out: &mut Vec<FlatNode>) {
+        let idx = *counter;
+        *counter += 1;
+        out.push(FlatNode {
             label: self.label.clone(),
             depth,
             expanded: self.expanded,
             has_children: !self.children.is_empty(),
-        }];
+            flat_index: idx,
+        });
         if self.expanded {
             for child in &self.children {
-                result.extend(child.flatten(depth + 1));
+                child.flatten_inner(depth + 1, counter, out);
             }
         }
-        result
     }
 
     pub fn flatten_all(roots: &[TreeNode]) -> Vec<FlatNode> {
         let mut items = Vec::new();
+        let mut counter = 0;
         for node in roots {
-            items.extend(node.flatten(0));
+            node.flatten_inner(0, &mut counter, &mut items);
         }
         items
+    }
+
+    /// Flatten tree nodes, keeping only nodes (and their ancestors) whose label
+    /// contains the given substring (case-insensitive). All matching subtrees
+    /// are shown expanded. Each node carries its `flat_index` from the unfiltered tree.
+    pub fn flatten_all_filtered(roots: &[TreeNode], filter: &str) -> Vec<FlatNode> {
+        let filter_lower = filter.to_lowercase();
+        let mut items = Vec::new();
+        let mut counter = 0;
+        for node in roots {
+            Self::flatten_filtered(node, 0, &filter_lower, &mut counter, &mut items);
+        }
+        items
+    }
+
+    fn node_matches_recursive(node: &TreeNode, filter: &str) -> bool {
+        if node.label.to_lowercase().contains(filter) {
+            return true;
+        }
+        node.children.iter().any(|c| Self::node_matches_recursive(c, filter))
+    }
+
+    fn flatten_filtered(node: &TreeNode, depth: u16, filter: &str, counter: &mut usize, out: &mut Vec<FlatNode>) {
+        let idx = *counter;
+        *counter += 1;
+        if !Self::node_matches_recursive(node, filter) {
+            // Still need to count children for correct flat_index mapping
+            Self::count_visible(node, counter);
+            return;
+        }
+        out.push(FlatNode {
+            label: node.label.clone(),
+            depth,
+            expanded: true,
+            has_children: !node.children.is_empty(),
+            flat_index: idx,
+        });
+        for child in &node.children {
+            Self::flatten_filtered(child, depth + 1, filter, counter, out);
+        }
+    }
+
+    /// Count all visible (expanded) descendants to advance the counter correctly.
+    fn count_visible(node: &TreeNode, counter: &mut usize) {
+        if node.expanded {
+            for child in &node.children {
+                *counter += 1;
+                Self::count_visible(child, counter);
+            }
+        }
     }
 
     pub fn toggle_at_index(nodes: &mut [TreeNode], flat_index: usize) {
@@ -211,5 +266,97 @@ mod tests {
         // conn1 has children, Tables has children, Views has children, conn2 has no children
         let flags: Vec<bool> = flat.iter().map(|n| n.has_children).collect();
         assert_eq!(flags, vec![true, true, true, false]);
+    }
+
+    #[test]
+    fn filtered_flatten_matches_substring() {
+        let mut tree = sample_tree();
+        // Expand conn1 so children are visible in unfiltered tree
+        TreeNode::toggle_at_index(&mut tree, 0);
+        TreeNode::toggle_at_index(&mut tree, 1); // expand Tables
+
+        let flat = TreeNode::flatten_all_filtered(&tree, "user");
+        let labels: Vec<&str> = flat.iter().map(|n| n.label.as_str()).collect();
+        // Should include conn1 (ancestor), Tables (ancestor), users (match)
+        assert_eq!(labels, vec!["conn1", "Tables", "users"]);
+    }
+
+    #[test]
+    fn filtered_flatten_case_insensitive() {
+        let tree = sample_tree();
+        let flat = TreeNode::flatten_all_filtered(&tree, "CONN1");
+        let labels: Vec<&str> = flat.iter().map(|n| n.label.as_str()).collect();
+        assert_eq!(labels, vec!["conn1"]);
+    }
+
+    #[test]
+    fn filtered_flatten_no_match_returns_empty() {
+        let tree = sample_tree();
+        let flat = TreeNode::flatten_all_filtered(&tree, "nonexistent");
+        assert!(flat.is_empty());
+    }
+
+    #[test]
+    fn filtered_flat_index_maps_to_unfiltered() {
+        let mut tree = sample_tree();
+        TreeNode::toggle_at_index(&mut tree, 0); // expand conn1
+        TreeNode::toggle_at_index(&mut tree, 1); // expand Tables
+        // Unfiltered: conn1(0), Tables(1), users(2), orders(3), Views(4), conn2(5)
+        let filtered = TreeNode::flatten_all_filtered(&tree, "orders");
+        assert_eq!(filtered.len(), 3); // conn1, Tables, orders
+        // "orders" should have flat_index 3
+        let orders = filtered.iter().find(|n| n.label == "orders").unwrap();
+        assert_eq!(orders.flat_index, 3);
+    }
+
+    #[test]
+    fn empty_tree() {
+        let tree: Vec<TreeNode> = vec![];
+        let flat = TreeNode::flatten_all(&tree);
+        assert!(flat.is_empty());
+    }
+
+    #[test]
+    fn deeply_nested_tree() {
+        let tree = vec![TreeNode::connection(
+            "root",
+            vec![TreeNode::folder(
+                "level1",
+                vec![TreeNode::folder(
+                    "level2",
+                    vec![TreeNode::folder(
+                        "level3",
+                        vec![TreeNode::leaf("leaf")],
+                    )],
+                )],
+            )],
+        )];
+        // Expand all levels
+        let mut tree = tree;
+        TreeNode::toggle_at_index(&mut tree, 0); // expand root
+        TreeNode::toggle_at_index(&mut tree, 1); // expand level1
+        TreeNode::toggle_at_index(&mut tree, 2); // expand level2
+        TreeNode::toggle_at_index(&mut tree, 3); // expand level3
+        let flat = TreeNode::flatten_all(&tree);
+        assert_eq!(flat.len(), 5);
+        let depths: Vec<u16> = flat.iter().map(|n| n.depth).collect();
+        assert_eq!(depths, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn multiple_sequential_mutations() {
+        let mut tree = sample_tree();
+        // Expand conn1
+        TreeNode::toggle_at_index(&mut tree, 0);
+        assert_eq!(TreeNode::flatten_all(&tree).len(), 4); // conn1, Tables, Views, conn2
+        // Collapse conn1
+        TreeNode::toggle_at_index(&mut tree, 0);
+        assert_eq!(TreeNode::flatten_all(&tree).len(), 2); // conn1, conn2
+        // Re-expand conn1
+        TreeNode::toggle_at_index(&mut tree, 0);
+        assert_eq!(TreeNode::flatten_all(&tree).len(), 4);
+        // Expand Tables
+        TreeNode::toggle_at_index(&mut tree, 1);
+        assert_eq!(TreeNode::flatten_all(&tree).len(), 6); // conn1, Tables, users, orders, Views, conn2
     }
 }
