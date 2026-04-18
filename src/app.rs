@@ -240,7 +240,11 @@ impl<'a> App<'a> {
     }
 
     pub fn handle_event(&mut self) -> Result<()> {
-        self.poll_background();
+        if self.poll_background() {
+            // Background task just completed — return immediately so the
+            // main loop re-renders without blocking on event::poll.
+            return Ok(());
+        }
 
         let poll_timeout = if self.loading.is_some() {
             Duration::from_millis(80)
@@ -700,20 +704,20 @@ impl<'a> App<'a> {
         self.vim = Vim::new(vim::Mode::Normal);
     }
 
-    fn poll_background(&mut self) {
+    fn poll_background(&mut self) -> bool {
         let result = match &self.bg_receiver {
             Some(rx) => match rx.try_recv() {
                 Ok(result) => result,
-                Err(mpsc::TryRecvError::Empty) => return,
+                Err(mpsc::TryRecvError::Empty) => return false,
                 Err(mpsc::TryRecvError::Disconnected) => {
                     error!("background task channel disconnected unexpectedly");
                     self.loading = None;
                     self.bg_receiver = None;
                     self.show_error("Background task failed unexpectedly");
-                    return;
+                    return true;
                 }
             },
-            None => return,
+            None => return false,
         };
 
         self.loading = None;
@@ -770,6 +774,7 @@ impl<'a> App<'a> {
                 }
             }
         }
+        true
     }
 
     fn refresh_schema(&mut self) {
