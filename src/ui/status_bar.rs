@@ -29,8 +29,8 @@ pub fn draw(app: &App, frame: &mut Frame, area: Rect) {
 
     // Right-align the help hint
     let left_len: usize = spans.iter().map(|s| s.content.len()).sum();
-    let hint = "? help";
-    let padding = area.width as usize - left_len - hint.len();
+    let hint = format!("{} leader  ? help", app.keys.leader.display);
+    let padding = (area.width as usize).saturating_sub(left_len + hint.len());
     if area.width as usize > left_len + hint.len() {
         spans.push(Span::raw(" ".repeat(padding)));
     }

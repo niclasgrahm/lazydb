@@ -24,6 +24,7 @@ impl KeyInput {
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct KeybindingsConfig {
+    pub leader_key: KeyInput,
     pub global: GlobalKeysConfig,
     pub sidebar: SidebarKeysConfig,
     pub results: ResultsKeysConfig,
@@ -32,6 +33,7 @@ pub struct KeybindingsConfig {
 impl Default for KeybindingsConfig {
     fn default() -> Self {
         Self {
+            leader_key: KeyInput::Single("space".into()),
             global: GlobalKeysConfig::default(),
             sidebar: SidebarKeysConfig::default(),
             results: ResultsKeysConfig::default(),
@@ -224,7 +226,15 @@ pub struct ResultsKeys {
     pub quit: Action,
 }
 
+/// A single entry in the leader menu.
+#[derive(Debug, Clone)]
+pub struct LeaderEntry {
+    pub key: char,
+    pub label: &'static str,
+}
+
 pub struct Keybindings {
+    pub leader: Action,
     pub global: GlobalKeys,
     pub sidebar: SidebarKeys,
     pub results: ResultsKeys,
@@ -233,6 +243,7 @@ pub struct Keybindings {
 impl Keybindings {
     pub fn from_config(config: KeybindingsConfig) -> Self {
         Self {
+            leader: Action::from_config(&config.leader_key),
             global: GlobalKeys {
                 execute_query: Action::from_config(&config.global.execute_query),
                 format_query: Action::from_config(&config.global.format_query),
@@ -357,4 +368,21 @@ mod tests {
         assert!(!kb.results.scroll_down.keys.is_empty());
         assert!(!kb.results.quit.keys.is_empty());
     }
+
+    #[test]
+    fn default_leader_key_is_space() {
+        let kb = Keybindings::from_config(KeybindingsConfig::default());
+        let space = KeyEvent::new(KeyCode::Char(' '), KeyModifiers::empty());
+        assert!(kb.leader.matches(&space));
+    }
+
+    #[test]
+    fn custom_leader_key() {
+        let mut config = KeybindingsConfig::default();
+        config.leader_key = KeyInput::Single("\\".into());
+        let kb = Keybindings::from_config(config);
+        let backslash = KeyEvent::new(KeyCode::Char('\\'), KeyModifiers::empty());
+        assert!(kb.leader.matches(&backslash));
+    }
+
 }

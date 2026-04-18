@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use crate::config::{AppConfig, Connection, Profiles};
 use crate::db::{self, Database, QueryResult, SchemaNode};
-use crate::keybindings::Keybindings;
+use crate::keybindings::{Keybindings, LeaderEntry};
 use crate::tree::TreeNode;
 use crate::vim::{self, Transition, Vim};
 
@@ -79,6 +79,7 @@ pub struct App<'a> {
     bg_receiver: Option<mpsc::Receiver<BgResult>>,
     pub sidebar_filter: String,
     pub sidebar_filtering: bool,
+    pub leader_active: bool,
 }
 
 impl<'a> App<'a> {
@@ -124,6 +125,7 @@ impl<'a> App<'a> {
             bg_receiver: None,
             sidebar_filter: String::new(),
             sidebar_filtering: false,
+            leader_active: false,
         }
     }
 
@@ -280,6 +282,21 @@ impl<'a> App<'a> {
             let in_normal = self.focus != Focus::QueryEditor
                 || self.vim.mode == vim::Mode::Normal;
 
+            // Leader key dispatch: if leader is active, handle the action key
+            if self.leader_active {
+                self.leader_active = false;
+                if let Event::Key(key) = &event {
+                    self.handle_leader_action(key);
+                }
+                return Ok(());
+            }
+
+            // Activate leader mode on leader key press (only in normal-like contexts)
+            if in_normal && self.keys.leader.matches(key) {
+                self.leader_active = true;
+                return Ok(());
+            }
+
             // Global keybindings (only when not in editor insert mode)
             if in_normal {
                 if self.keys.global.show_help.matches(key) {
@@ -333,6 +350,56 @@ impl<'a> App<'a> {
             }
         }
         Ok(())
+    }
+
+    /// Returns the leader menu entries for the current focus context.
+    pub fn leader_actions(&self) -> Vec<LeaderEntry> {
+        let mut actions = Vec::new();
+        match self.focus {
+            Focus::QueryEditor => {
+                actions.push(LeaderEntry { key: 'e', label: "Execute query" });
+                actions.push(LeaderEntry { key: 'f', label: "Format query" });
+            }
+            Focus::Sidebar => {
+                actions.push(LeaderEntry { key: 's', label: "Preview table" });
+                actions.push(LeaderEntry { key: 'e', label: "Execute query" });
+            }
+            Focus::Results => {
+                actions.push(LeaderEntry { key: 'c', label: "Close results" });
+                actions.push(LeaderEntry { key: 'e', label: "Execute query" });
+            }
+        }
+        actions.push(LeaderEntry { key: 'h', label: "Help" });
+        actions
+    }
+
+    fn handle_leader_action(&mut self, key: &crossterm::event::KeyEvent) {
+        use crossterm::event::KeyCode;
+        let KeyCode::Char(ch) = key.code else { return };
+
+        // Only dispatch if the key is valid for current context
+        if !self.leader_actions().iter().any(|a| a.key == ch) {
+            return;
+        }
+
+        match ch {
+            'e' => self.execute_query(),
+            'f' => self.format_query(),
+            'h' => self.show_help = true,
+            's' => {
+                if let Some(selected) = self.sidebar_state.selected() {
+                    let flat = self.filtered_flat_nodes();
+                    if let Some(node) = flat.get(selected) {
+                        self.preview_table(node.flat_index);
+                    }
+                }
+            }
+            'c' => {
+                self.results_visible = false;
+                self.focus = Focus::QueryEditor;
+            }
+            _ => {}
+        }
     }
 
     fn handle_sidebar_filter_key(&mut self, key: &crossterm::event::KeyEvent) {
@@ -766,6 +833,15 @@ impl<'a> App<'a> {
     fn set_bg_receiver(&mut self, rx: mpsc::Receiver<BgResult>) {
         self.bg_receiver = Some(rx);
         self.loading = Some("test".into());
+    }
+
+    fn handle_leader_key_press(&mut self) {
+        // Simulate pressing the leader key in a normal-mode context
+        let in_normal = self.focus != Focus::QueryEditor
+            || self.vim.mode == vim::Mode::Normal;
+        if in_normal {
+            self.leader_active = true;
+        }
     }
 }
 
@@ -1240,6 +1316,98 @@ mod tests {
         app.show_info("all good");
         assert!(app.message.is_some());
         assert_eq!(app.message.as_ref().unwrap().level, MessageLevel::Info);
+    }
+
+    // --- Leader key ---
+
+    #[test]
+    fn leader_key_activates() {
+        let mut app = App::new(AppConfig::default(), test_profiles());
+        assert!(!app.leader_active);
+        // Space is the default leader key, sidebar is default focus (normal context)
+        app.handle_leader_key_press();
+        assert!(app.leader_active);
+    }
+
+    #[test]
+    fn leader_actions_query_editor() {
+        let mut app = App::new(AppConfig::default(), test_profiles());
+        app.focus = Focus::QueryEditor;
+        let actions = app.leader_actions();
+        assert!(actions.iter().any(|a| a.key == 'e'), "execute");
+        assert!(actions.iter().any(|a| a.key == 'f'), "format");
+        assert!(actions.iter().any(|a| a.key == 'h'), "help");
+        assert!(!actions.iter().any(|a| a.key == 's'), "no preview");
+        assert!(!actions.iter().any(|a| a.key == 'c'), "no close");
+    }
+
+    #[test]
+    fn leader_actions_sidebar() {
+        let mut app = App::new(AppConfig::default(), test_profiles());
+        app.focus = Focus::Sidebar;
+        let actions = app.leader_actions();
+        assert!(actions.iter().any(|a| a.key == 's'), "preview");
+        assert!(actions.iter().any(|a| a.key == 'e'), "execute");
+        assert!(actions.iter().any(|a| a.key == 'h'), "help");
+        assert!(!actions.iter().any(|a| a.key == 'f'), "no format");
+    }
+
+    #[test]
+    fn leader_actions_results() {
+        let mut app = App::new(AppConfig::default(), test_profiles());
+        app.focus = Focus::Results;
+        let actions = app.leader_actions();
+        assert!(actions.iter().any(|a| a.key == 'c'), "close");
+        assert!(actions.iter().any(|a| a.key == 'e'), "execute");
+        assert!(actions.iter().any(|a| a.key == 'h'), "help");
+        assert!(!actions.iter().any(|a| a.key == 'f'), "no format");
+    }
+
+    #[test]
+    fn leader_action_format() {
+        let mut app = App::new(AppConfig::default(), test_profiles());
+        app.focus = Focus::QueryEditor;
+        app.editor.insert_str("select * from foo");
+        app.handle_leader_action(&key(KeyCode::Char('f')));
+        let text: String = app.editor.lines().join("\n");
+        assert!(text.contains("SELECT"));
+    }
+
+    #[test]
+    fn leader_action_help() {
+        let mut app = App::new(AppConfig::default(), test_profiles());
+        app.handle_leader_action(&key(KeyCode::Char('h')));
+        assert!(app.show_help);
+    }
+
+    #[test]
+    fn leader_action_close_results() {
+        let mut app = App::new(AppConfig::default(), test_profiles());
+        app.focus = Focus::Results;
+        app.results_visible = true;
+        app.handle_leader_action(&key(KeyCode::Char('c')));
+        assert!(!app.results_visible);
+        assert_eq!(app.focus, Focus::QueryEditor);
+    }
+
+    #[test]
+    fn leader_ignores_invalid_action_for_context() {
+        let mut app = App::new(AppConfig::default(), test_profiles());
+        app.focus = Focus::Sidebar;
+        // 'f' (format) is not available in sidebar context
+        app.handle_leader_action(&key(KeyCode::Char('f')));
+        // Should be a no-op — query text unchanged
+        let text: String = app.editor.lines().join("\n");
+        assert!(text.is_empty());
+    }
+
+    #[test]
+    fn leader_not_active_in_insert_mode() {
+        let mut app = App::new(AppConfig::default(), test_profiles());
+        app.focus = Focus::QueryEditor;
+        app.vim = Vim::new(vim::Mode::Insert);
+        app.handle_leader_key_press();
+        assert!(!app.leader_active);
     }
 
     // --- query_is_select ---
