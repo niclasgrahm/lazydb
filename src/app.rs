@@ -36,6 +36,13 @@ pub struct Message {
     pub level: MessageLevel,
 }
 
+#[derive(Debug, PartialEq)]
+pub enum SidebarNodeKind {
+    Connection,
+    TableOrView,
+    Other,
+}
+
 pub const RESULTS_PAGE_SIZE: usize = 100;
 
 pub enum BgResult {
@@ -352,6 +359,37 @@ impl<'a> App<'a> {
         Ok(())
     }
 
+    /// Classifies the currently selected sidebar node.
+    fn sidebar_node_kind(&self) -> SidebarNodeKind {
+        let Some(selected) = self.sidebar_state.selected() else {
+            return SidebarNodeKind::Other;
+        };
+        let flat = self.filtered_flat_nodes();
+        let Some(node) = flat.get(selected) else {
+            return SidebarNodeKind::Other;
+        };
+
+        if node.depth == 0 {
+            return SidebarNodeKind::Connection;
+        }
+
+        // Walk backwards to find the immediate parent
+        let full_flat = TreeNode::flatten_all(&self.sidebar_items);
+        if let Some(n) = full_flat.get(node.flat_index) {
+            let target_depth = n.depth;
+            for ancestor in full_flat[..node.flat_index].iter().rev() {
+                if ancestor.depth == target_depth - 1 {
+                    if ancestor.label == "Tables" || ancestor.label == "Views" {
+                        return SidebarNodeKind::TableOrView;
+                    }
+                    break;
+                }
+            }
+        }
+
+        SidebarNodeKind::Other
+    }
+
     /// Returns the leader menu entries for the current focus context.
     pub fn leader_actions(&self) -> Vec<LeaderEntry> {
         let mut actions = Vec::new();
@@ -361,7 +399,20 @@ impl<'a> App<'a> {
                 actions.push(LeaderEntry { key: 'f', label: "Format query" });
             }
             Focus::Sidebar => {
-                actions.push(LeaderEntry { key: 's', label: "Preview table" });
+                let kind = self.sidebar_node_kind();
+                match kind {
+                    SidebarNodeKind::Connection => {
+                        if self.connected_db.is_some() {
+                            actions.push(LeaderEntry { key: 'd', label: "Disconnect" });
+                        } else {
+                            actions.push(LeaderEntry { key: 'o', label: "Connect" });
+                        }
+                    }
+                    SidebarNodeKind::TableOrView => {
+                        actions.push(LeaderEntry { key: 's', label: "Preview table" });
+                    }
+                    SidebarNodeKind::Other => {}
+                }
                 actions.push(LeaderEntry { key: 'e', label: "Execute query" });
             }
             Focus::Results => {
@@ -391,6 +442,18 @@ impl<'a> App<'a> {
                     let flat = self.filtered_flat_nodes();
                     if let Some(node) = flat.get(selected) {
                         self.preview_table(node.flat_index);
+                    }
+                }
+            }
+            'o' | 'd' => {
+                // Connect / Disconnect: activate the selected connection node
+                if let Some(selected) = self.sidebar_state.selected() {
+                    let flat = self.filtered_flat_nodes();
+                    if let Some(node) = flat.get(selected) {
+                        if node.depth == 0 {
+                            self.sidebar_filter.clear();
+                            self.toggle_connection(node.flat_index);
+                        }
                     }
                 }
             }
@@ -1342,14 +1405,67 @@ mod tests {
     }
 
     #[test]
-    fn leader_actions_sidebar() {
+    fn leader_actions_sidebar_on_connection() {
         let mut app = App::new(AppConfig::default(), test_profiles());
         app.focus = Focus::Sidebar;
+        // Default selection is index 0, which is a connection node (depth 0)
         let actions = app.leader_actions();
-        assert!(actions.iter().any(|a| a.key == 's'), "preview");
+        assert!(actions.iter().any(|a| a.key == 'o'), "connect");
+        assert!(!actions.iter().any(|a| a.key == 's'), "no preview on connection");
         assert!(actions.iter().any(|a| a.key == 'e'), "execute");
         assert!(actions.iter().any(|a| a.key == 'h'), "help");
-        assert!(!actions.iter().any(|a| a.key == 'f'), "no format");
+    }
+
+    #[test]
+    fn leader_actions_sidebar_on_table() {
+        let mut app = App::new(AppConfig::default(), test_profiles());
+        app.focus = Focus::Sidebar;
+        // Populate schema so we have table nodes
+        let label = app.sidebar_items[0].label.clone();
+        app.populate_schema(&label, vec![
+            SchemaNode::group("Tables", vec![
+                SchemaNode::leaf("users"),
+            ]),
+        ]);
+        // Expand the connection and Tables folder to make "users" visible
+        app.sidebar_items[0].expanded = true;
+        app.sidebar_items[0].children[0].expanded = true;
+        // "users" should be at flat index 2 (connection=0, Tables=1, users=2)
+        app.sidebar_state.select(Some(2));
+        let actions = app.leader_actions();
+        assert!(actions.iter().any(|a| a.key == 's'), "preview on table");
+        assert!(!actions.iter().any(|a| a.key == 'o'), "no connect on table");
+        assert!(!actions.iter().any(|a| a.key == 'd'), "no disconnect on table");
+    }
+
+    #[test]
+    fn leader_actions_sidebar_on_folder() {
+        let mut app = App::new(AppConfig::default(), test_profiles());
+        app.focus = Focus::Sidebar;
+        let label = app.sidebar_items[0].label.clone();
+        app.populate_schema(&label, vec![
+            SchemaNode::group("Tables", vec![
+                SchemaNode::leaf("users"),
+            ]),
+        ]);
+        app.sidebar_items[0].expanded = true;
+        // Select the "Tables" folder (flat index 1)
+        app.sidebar_state.select(Some(1));
+        let actions = app.leader_actions();
+        assert!(!actions.iter().any(|a| a.key == 's'), "no preview on folder");
+        assert!(!actions.iter().any(|a| a.key == 'o'), "no connect on folder");
+        assert!(actions.iter().any(|a| a.key == 'e'), "execute always available");
+        assert!(actions.iter().any(|a| a.key == 'h'), "help always available");
+    }
+
+    #[test]
+    fn leader_actions_sidebar_disconnect_when_connected() {
+        let mut app = App::new(AppConfig::default(), test_profiles());
+        app.focus = Focus::Sidebar;
+        app.connected_db = Some(app.sidebar_items[0].label.clone());
+        let actions = app.leader_actions();
+        assert!(actions.iter().any(|a| a.key == 'd'), "disconnect when connected");
+        assert!(!actions.iter().any(|a| a.key == 'o'), "no connect when already connected");
     }
 
     #[test]
