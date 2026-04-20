@@ -11,8 +11,10 @@ use crate::app::{App, Focus};
 pub fn draw(app: &App, frame: &mut Frame, area: Rect) {
     let focus_label = match app.focus {
         Focus::Sidebar => "CONNECTIONS",
+        Focus::Files => "FILES",
         Focus::QueryEditor => "QUERY",
         Focus::Results => "RESULTS",
+        Focus::Recent => "RECENT",
     };
 
     let mut spans = vec![

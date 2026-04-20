@@ -18,11 +18,13 @@ use crate::keybindings::{Keybindings, LeaderEntry};
 use crate::tree::TreeNode;
 use crate::vim::{self, Transition, Vim};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Focus {
     Sidebar,
+    Files,
     QueryEditor,
     Results,
+    Recent,
 }
 
 #[derive(Debug, PartialEq)]
@@ -87,6 +89,9 @@ pub struct App<'a> {
     pub sidebar_filter: String,
     pub sidebar_filtering: bool,
     pub leader_active: bool,
+    pub show_sidebar: bool,
+    pub show_files: bool,
+    pub show_recent: bool,
 }
 
 impl<'a> App<'a> {
@@ -133,6 +138,9 @@ impl<'a> App<'a> {
             sidebar_filter: String::new(),
             sidebar_filtering: false,
             leader_active: false,
+            show_sidebar: true,
+            show_files: false,
+            show_recent: false,
         }
     }
 
@@ -148,6 +156,45 @@ impl<'a> App<'a> {
             text: text.into(),
             level: MessageLevel::Info,
         });
+    }
+
+    /// Returns the ordered list of currently visible focus targets.
+    fn visible_panes(&self) -> Vec<Focus> {
+        let mut panes = Vec::new();
+        if self.show_sidebar { panes.push(Focus::Sidebar); }
+        if self.show_files { panes.push(Focus::Files); }
+        panes.push(Focus::QueryEditor); // always visible
+        if self.results_visible { panes.push(Focus::Results); }
+        if self.show_recent { panes.push(Focus::Recent); }
+        panes
+    }
+
+    /// Cycles focus forward (or backward) through visible panes.
+    fn next_visible_focus(&self, forward: bool) -> Focus {
+        let panes = self.visible_panes();
+        let current = panes.iter().position(|&f| f == self.focus).unwrap_or(0);
+        if forward {
+            panes[(current + 1) % panes.len()]
+        } else {
+            panes[(current + panes.len() - 1) % panes.len()]
+        }
+    }
+
+    /// Toggles a pane's visibility. If the pane was focused, moves focus to
+    /// the query editor.
+    pub fn toggle_pane_visibility(&mut self, pane: Focus) {
+        let (visible, is_focused) = match pane {
+            Focus::Sidebar => (&mut self.show_sidebar, self.focus == Focus::Sidebar),
+            Focus::Files => (&mut self.show_files, self.focus == Focus::Files),
+            Focus::Recent => (&mut self.show_recent, self.focus == Focus::Recent),
+            _ => return,
+        };
+        *visible = !*visible;
+        if *visible {
+            self.focus = pane;
+        } else if is_focused {
+            self.focus = Focus::QueryEditor;
+        }
     }
 
     pub fn format_query(&mut self) {
@@ -286,7 +333,7 @@ impl<'a> App<'a> {
                 return Ok(());
             }
 
-            let in_normal = self.focus != Focus::QueryEditor
+            let in_normal = !matches!(self.focus, Focus::QueryEditor)
                 || self.vim.mode == vim::Mode::Normal;
 
             // Leader key dispatch: if leader is active, handle the action key
@@ -319,21 +366,11 @@ impl<'a> App<'a> {
                     return Ok(());
                 }
                 if self.keys.global.next_pane.matches(key) {
-                    self.focus = match self.focus {
-                        Focus::Sidebar => Focus::QueryEditor,
-                        Focus::QueryEditor if self.results_visible => Focus::Results,
-                        Focus::QueryEditor => Focus::Sidebar,
-                        Focus::Results => Focus::Sidebar,
-                    };
+                    self.focus = self.next_visible_focus(true);
                     return Ok(());
                 }
                 if self.keys.global.prev_pane.matches(key) {
-                    self.focus = match self.focus {
-                        Focus::Sidebar if self.results_visible => Focus::Results,
-                        Focus::Sidebar => Focus::QueryEditor,
-                        Focus::QueryEditor => Focus::Sidebar,
-                        Focus::Results => Focus::QueryEditor,
-                    };
+                    self.focus = self.next_visible_focus(false);
                     return Ok(());
                 }
             }
@@ -354,6 +391,8 @@ impl<'a> App<'a> {
                 Focus::Sidebar if self.sidebar_filtering => self.handle_sidebar_filter_key(key),
                 Focus::Sidebar => self.handle_sidebar_key(key),
                 Focus::Results => self.handle_results_key(key),
+                Focus::Files => self.handle_files_key(key),
+                Focus::Recent => self.handle_recent_key(key),
             }
         }
         Ok(())
@@ -419,7 +458,16 @@ impl<'a> App<'a> {
                 actions.push(LeaderEntry { key: 'c', label: "Close results" });
                 actions.push(LeaderEntry { key: 'e', label: "Execute query" });
             }
+            Focus::Files => {
+                actions.push(LeaderEntry { key: 'e', label: "Execute query" });
+            }
+            Focus::Recent => {
+                actions.push(LeaderEntry { key: 'e', label: "Execute query" });
+            }
         }
+        actions.push(LeaderEntry { key: '1', label: "Toggle connections" });
+        actions.push(LeaderEntry { key: '2', label: "Toggle files" });
+        actions.push(LeaderEntry { key: '3', label: "Toggle recent" });
         actions.push(LeaderEntry { key: 'h', label: "Help" });
         actions
     }
@@ -461,6 +509,9 @@ impl<'a> App<'a> {
                 self.results_visible = false;
                 self.focus = Focus::QueryEditor;
             }
+            '1' => self.toggle_pane_visibility(Focus::Sidebar),
+            '2' => self.toggle_pane_visibility(Focus::Files),
+            '3' => self.toggle_pane_visibility(Focus::Recent),
             _ => {}
         }
     }
@@ -644,6 +695,20 @@ impl<'a> App<'a> {
             self.results_next_page();
         } else if kb.prev_page.matches(key) {
             self.results_prev_page();
+        }
+    }
+
+    fn handle_files_key(&mut self, key: &crossterm::event::KeyEvent) {
+        use crossterm::event::KeyCode;
+        if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc {
+            self.running = false;
+        }
+    }
+
+    fn handle_recent_key(&mut self, key: &crossterm::event::KeyEvent) {
+        use crossterm::event::KeyCode;
+        if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc {
+            self.running = false;
         }
     }
 
@@ -1016,28 +1081,16 @@ mod tests {
 
         assert_eq!(app.focus, Focus::Sidebar);
 
-        // Tab: Sidebar -> QueryEditor
-        let tab = key(KeyCode::Tab);
-        app.handle_sidebar_key(&tab);
-        // Tab is not handled by handle_sidebar_key, it's a global key
-        // We need to simulate the global keybinding match directly
-        app.focus = Focus::QueryEditor;
+        // Sidebar -> QueryEditor
+        app.focus = app.next_visible_focus(true);
         assert_eq!(app.focus, Focus::QueryEditor);
 
-        // Simulate next_pane from QueryEditor with results visible
-        app.focus = match app.focus {
-            Focus::Sidebar => Focus::QueryEditor,
-            Focus::QueryEditor if app.results_visible => Focus::Results,
-            Focus::QueryEditor => Focus::Sidebar,
-            Focus::Results => Focus::Sidebar,
-        };
+        // QueryEditor -> Results (visible)
+        app.focus = app.next_visible_focus(true);
         assert_eq!(app.focus, Focus::Results);
 
-        // Results -> Sidebar
-        app.focus = match app.focus {
-            Focus::Results => Focus::Sidebar,
-            _ => app.focus,
-        };
+        // Results -> Sidebar (wraps)
+        app.focus = app.next_visible_focus(true);
         assert_eq!(app.focus, Focus::Sidebar);
     }
 
@@ -1047,11 +1100,8 @@ mod tests {
         app.results_visible = false;
         app.focus = Focus::QueryEditor;
 
-        app.focus = match app.focus {
-            Focus::QueryEditor if app.results_visible => Focus::Results,
-            Focus::QueryEditor => Focus::Sidebar,
-            _ => app.focus,
-        };
+        // QueryEditor -> Sidebar (results hidden, wraps)
+        app.focus = app.next_visible_focus(true);
         assert_eq!(app.focus, Focus::Sidebar);
     }
 
@@ -1061,13 +1111,8 @@ mod tests {
         app.results_visible = true;
         app.focus = Focus::Sidebar;
 
-        // prev_pane: Sidebar -> Results (when visible)
-        app.focus = match app.focus {
-            Focus::Sidebar if app.results_visible => Focus::Results,
-            Focus::Sidebar => Focus::QueryEditor,
-            Focus::QueryEditor => Focus::Sidebar,
-            Focus::Results => Focus::QueryEditor,
-        };
+        // prev_pane: Sidebar -> Results (when visible, wraps backwards)
+        app.focus = app.next_visible_focus(false);
         assert_eq!(app.focus, Focus::Results);
     }
 
@@ -1549,6 +1594,149 @@ mod tests {
     fn query_is_select_values_and_table() {
         assert!(query_is_select("VALUES (1, 2), (3, 4)"));
         assert!(query_is_select("TABLE foo"));
+    }
+
+    // --- Pane visibility toggles ---
+
+    #[test]
+    fn toggle_sidebar_hides_and_shows() {
+        let mut app = App::new(AppConfig::default(), test_profiles());
+        assert!(app.show_sidebar);
+        app.toggle_pane_visibility(Focus::Sidebar);
+        assert!(!app.show_sidebar);
+        app.toggle_pane_visibility(Focus::Sidebar);
+        assert!(app.show_sidebar);
+    }
+
+    #[test]
+    fn toggle_files_hides_and_shows() {
+        let mut app = App::new(AppConfig::default(), test_profiles());
+        assert!(!app.show_files);
+        app.toggle_pane_visibility(Focus::Files);
+        assert!(app.show_files);
+        app.toggle_pane_visibility(Focus::Files);
+        assert!(!app.show_files);
+    }
+
+    #[test]
+    fn toggle_recent_hides_and_shows() {
+        let mut app = App::new(AppConfig::default(), test_profiles());
+        assert!(!app.show_recent);
+        app.toggle_pane_visibility(Focus::Recent);
+        assert!(app.show_recent);
+        app.toggle_pane_visibility(Focus::Recent);
+        assert!(!app.show_recent);
+    }
+
+    #[test]
+    fn toggle_focused_pane_moves_focus_to_editor() {
+        let mut app = App::new(AppConfig::default(), test_profiles());
+        app.focus = Focus::Sidebar;
+        app.toggle_pane_visibility(Focus::Sidebar);
+        assert_eq!(app.focus, Focus::QueryEditor);
+    }
+
+    #[test]
+    fn toggle_on_moves_focus_to_pane() {
+        let mut app = App::new(AppConfig::default(), test_profiles());
+        app.show_files = false;
+        app.focus = Focus::QueryEditor;
+        app.toggle_pane_visibility(Focus::Files);
+        assert_eq!(app.focus, Focus::Files);
+    }
+
+    #[test]
+    fn toggle_noop_for_query_editor() {
+        let mut app = App::new(AppConfig::default(), test_profiles());
+        app.focus = Focus::QueryEditor;
+        // QueryEditor is not toggleable
+        app.toggle_pane_visibility(Focus::QueryEditor);
+        assert_eq!(app.focus, Focus::QueryEditor);
+    }
+
+    // --- Focus cycling with new panes ---
+
+    #[test]
+    fn focus_cycles_through_all_visible_panes() {
+        let mut app = App::new(AppConfig::default(), test_profiles());
+        app.show_sidebar = true;
+        app.show_files = true;
+        app.show_recent = true;
+        app.results_visible = true;
+        app.focus = Focus::Sidebar;
+
+        // Sidebar -> Files -> QueryEditor -> Results -> Recent -> Sidebar
+        app.focus = app.next_visible_focus(true);
+        assert_eq!(app.focus, Focus::Files);
+        app.focus = app.next_visible_focus(true);
+        assert_eq!(app.focus, Focus::QueryEditor);
+        app.focus = app.next_visible_focus(true);
+        assert_eq!(app.focus, Focus::Results);
+        app.focus = app.next_visible_focus(true);
+        assert_eq!(app.focus, Focus::Recent);
+        app.focus = app.next_visible_focus(true);
+        assert_eq!(app.focus, Focus::Sidebar);
+    }
+
+    #[test]
+    fn focus_skips_hidden_panes() {
+        let mut app = App::new(AppConfig::default(), test_profiles());
+        app.show_sidebar = false;
+        app.show_files = false;
+        app.show_recent = false;
+        app.results_visible = false;
+        app.focus = Focus::QueryEditor;
+
+        // Only QueryEditor visible — cycles to itself
+        app.focus = app.next_visible_focus(true);
+        assert_eq!(app.focus, Focus::QueryEditor);
+    }
+
+    #[test]
+    fn focus_reverse_with_all_panes() {
+        let mut app = App::new(AppConfig::default(), test_profiles());
+        app.show_sidebar = true;
+        app.show_files = true;
+        app.show_recent = true;
+        app.results_visible = true;
+        app.focus = Focus::Sidebar;
+
+        // Backwards: Sidebar -> Recent -> Results -> QueryEditor -> Files -> Sidebar
+        app.focus = app.next_visible_focus(false);
+        assert_eq!(app.focus, Focus::Recent);
+        app.focus = app.next_visible_focus(false);
+        assert_eq!(app.focus, Focus::Results);
+        app.focus = app.next_visible_focus(false);
+        assert_eq!(app.focus, Focus::QueryEditor);
+        app.focus = app.next_visible_focus(false);
+        assert_eq!(app.focus, Focus::Files);
+        app.focus = app.next_visible_focus(false);
+        assert_eq!(app.focus, Focus::Sidebar);
+    }
+
+    #[test]
+    fn visible_panes_default() {
+        let app = App::new(AppConfig::default(), test_profiles());
+        // Default: sidebar + query editor
+        let panes = app.visible_panes();
+        assert_eq!(panes, vec![Focus::Sidebar, Focus::QueryEditor]);
+    }
+
+    #[test]
+    fn visible_panes_all() {
+        let mut app = App::new(AppConfig::default(), test_profiles());
+        app.show_sidebar = true;
+        app.show_files = true;
+        app.show_recent = true;
+        app.results_visible = true;
+        let panes = app.visible_panes();
+        assert_eq!(panes, vec![
+            Focus::Sidebar,
+            Focus::Files,
+            Focus::QueryEditor,
+            Focus::Results,
+            Focus::Recent,
+        ]);
     }
 }
 

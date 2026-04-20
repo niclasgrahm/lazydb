@@ -26,6 +26,14 @@ pub fn draw(app: &App, frame: &mut Frame) {
     lines.push(key_line(&g.show_help, "Toggle help"));
     lines.push(Line::raw(""));
 
+    // Leader pane toggles
+    let leader = &app.keys.leader.display;
+    lines.push(section_header("Pane Toggles"));
+    lines.push(leader_line(leader, '1', "Toggle connections"));
+    lines.push(leader_line(leader, '2', "Toggle files"));
+    lines.push(leader_line(leader, '3', "Toggle recent"));
+    lines.push(Line::raw(""));
+
     // Context-specific section
     match app.focus {
         Focus::Sidebar => {
@@ -73,6 +81,18 @@ pub fn draw(app: &App, frame: &mut Frame) {
             lines.push(key_line(&r.close, "Close results"));
             lines.push(key_line(&r.quit, "Quit"));
         }
+        Focus::Files => {
+            lines.push(section_header("Files"));
+            lines.push(Line::from(vec![
+                Span::styled("  (empty)", Style::default().fg(Color::DarkGray)),
+            ]));
+        }
+        Focus::Recent => {
+            lines.push(section_header("Recent"));
+            lines.push(Line::from(vec![
+                Span::styled("  (empty)", Style::default().fg(Color::DarkGray)),
+            ]));
+        }
     }
 
     lines.push(Line::raw(""));
@@ -92,6 +112,14 @@ pub fn draw(app: &App, frame: &mut Frame) {
 
     frame.render_widget(Clear, area);
     frame.render_widget(paragraph, area);
+}
+
+fn leader_line(leader: &str, key: char, description: &str) -> Line<'static> {
+    let display = format!("  {leader} {key}");
+    Line::from(vec![
+        Span::styled(format!("{display:<12}"), Style::default().fg(Color::Yellow)),
+        Span::raw(description.to_string()),
+    ])
 }
 
 fn section_header(name: &str) -> Line<'static> {
