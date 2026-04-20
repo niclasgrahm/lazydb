@@ -6,6 +6,7 @@ use color_eyre::eyre::{Context, Result};
 use serde::Deserialize;
 
 use crate::db::clickhouse_backend::ClickHouse;
+use crate::db::databricks_backend::Databricks;
 use crate::db::duckdb_backend::DuckDb;
 use crate::db::postgres_backend::Postgres;
 use crate::db::snowflake_backend::Snowflake;
@@ -78,6 +79,8 @@ pub enum Connection {
     ClickHouse(ClickHouseConnection),
     #[serde(rename = "snowflake")]
     Snowflake(SnowflakeConnection),
+    #[serde(rename = "databricks")]
+    Databricks(DatabricksConnection),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -168,6 +171,17 @@ pub struct SnowflakeConnection {
     pub role: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct DatabricksConnection {
+    pub host: String,
+    pub token: String,
+    pub warehouse_id: String,
+    #[serde(default)]
+    pub catalog: Option<String>,
+    #[serde(default)]
+    pub schema: Option<String>,
+}
+
 impl Connection {
     pub fn type_name(&self) -> &'static str {
         match self {
@@ -175,6 +189,7 @@ impl Connection {
             Connection::Postgres(_) => "postgres",
             Connection::ClickHouse(_) => "clickhouse",
             Connection::Snowflake(_) => "snowflake",
+            Connection::Databricks(_) => "databricks",
         }
     }
 
@@ -221,6 +236,16 @@ impl Connection {
                 )
                 .map(|db| Box::new(db) as Box<dyn Database>),
             },
+            Connection::Databricks(cfg) => {
+                Databricks::connect(
+                    &cfg.host,
+                    &cfg.token,
+                    &cfg.warehouse_id,
+                    cfg.catalog.as_deref(),
+                    cfg.schema.as_deref(),
+                )
+                .map(|db| Box::new(db) as Box<dyn Database>)
+            }
         }
     }
 }
@@ -470,6 +495,56 @@ mod tests {
             database: "d".into(), warehouse: None, schema: None, role: None,
         });
         assert_eq!(sf.type_name(), "snowflake");
+
+        let db = Connection::Databricks(DatabricksConnection {
+            host: "h".into(), token: "t".into(), warehouse_id: "w".into(),
+            catalog: None, schema: None,
+        });
+        assert_eq!(db.type_name(), "databricks");
+    }
+
+    #[test]
+    fn parse_databricks_profile() {
+        let toml = r#"
+            [connections.db]
+            type = "databricks"
+            host = "adb-1234567890123456.7.azuredatabricks.net"
+            token = "dapi0123456789abcdef"
+            warehouse_id = "abc123def456"
+            catalog = "main"
+            schema = "default"
+        "#;
+        let profiles: Profiles = toml::from_str(toml).unwrap();
+        match profiles.connections.get("db").unwrap() {
+            Connection::Databricks(db) => {
+                assert_eq!(db.host, "adb-1234567890123456.7.azuredatabricks.net");
+                assert_eq!(db.token, "dapi0123456789abcdef");
+                assert_eq!(db.warehouse_id, "abc123def456");
+                assert_eq!(db.catalog.as_deref(), Some("main"));
+                assert_eq!(db.schema.as_deref(), Some("default"));
+            }
+            _ => panic!("expected Databricks"),
+        }
+    }
+
+    #[test]
+    fn parse_databricks_minimal() {
+        let toml = r#"
+            [connections.db]
+            type = "databricks"
+            host = "workspace.azuredatabricks.net"
+            token = "dapi_token"
+            warehouse_id = "wh123"
+        "#;
+        let profiles: Profiles = toml::from_str(toml).unwrap();
+        match profiles.connections.get("db").unwrap() {
+            Connection::Databricks(db) => {
+                assert_eq!(db.host, "workspace.azuredatabricks.net");
+                assert_eq!(db.catalog, None);
+                assert_eq!(db.schema, None);
+            }
+            _ => panic!("expected Databricks"),
+        }
     }
 
     #[test]
