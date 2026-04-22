@@ -72,7 +72,6 @@ pub struct SidebarKeysConfig {
     pub collapse: KeyInput,
     pub activate: KeyInput,
     pub preview: KeyInput,
-    pub quit: KeyInput,
 }
 
 impl Default for SidebarKeysConfig {
@@ -84,7 +83,6 @@ impl Default for SidebarKeysConfig {
             collapse: KeyInput::Multiple(vec!["h".into(), "left".into()]),
             activate: KeyInput::Single("enter".into()),
             preview: KeyInput::Single("s".into()),
-            quit: KeyInput::Multiple(vec!["q".into(), "esc".into()]),
         }
     }
 }
@@ -99,7 +97,6 @@ pub struct ResultsKeysConfig {
     pub next_page: KeyInput,
     pub prev_page: KeyInput,
     pub close: KeyInput,
-    pub quit: KeyInput,
 }
 
 impl Default for ResultsKeysConfig {
@@ -112,7 +109,6 @@ impl Default for ResultsKeysConfig {
             next_page: KeyInput::Multiple(vec!["n".into(), "pagedown".into()]),
             prev_page: KeyInput::Multiple(vec!["p".into(), "pageup".into()]),
             close: KeyInput::Multiple(vec!["c".into(), "esc".into()]),
-            quit: KeyInput::Single("q".into()),
         }
     }
 }
@@ -212,7 +208,6 @@ pub struct SidebarKeys {
     pub collapse: Action,
     pub activate: Action,
     pub preview: Action,
-    pub quit: Action,
 }
 
 pub struct ResultsKeys {
@@ -223,7 +218,6 @@ pub struct ResultsKeys {
     pub next_page: Action,
     pub prev_page: Action,
     pub close: Action,
-    pub quit: Action,
 }
 
 /// A single entry in the leader menu.
@@ -258,7 +252,6 @@ impl Keybindings {
                 collapse: Action::from_config(&config.sidebar.collapse),
                 activate: Action::from_config(&config.sidebar.activate),
                 preview: Action::from_config(&config.sidebar.preview),
-                quit: Action::from_config(&config.sidebar.quit),
             },
             results: ResultsKeys {
                 scroll_up: Action::from_config(&config.results.scroll_up),
@@ -268,7 +261,6 @@ impl Keybindings {
                 next_page: Action::from_config(&config.results.next_page),
                 prev_page: Action::from_config(&config.results.prev_page),
                 close: Action::from_config(&config.results.close),
-                quit: Action::from_config(&config.results.quit),
             },
         }
     }
@@ -364,9 +356,7 @@ mod tests {
         assert!(!kb.global.execute_query.keys.is_empty());
         assert!(!kb.global.next_pane.keys.is_empty());
         assert!(!kb.sidebar.navigate_up.keys.is_empty());
-        assert!(!kb.sidebar.quit.keys.is_empty());
         assert!(!kb.results.scroll_down.keys.is_empty());
-        assert!(!kb.results.quit.keys.is_empty());
     }
 
     #[test]

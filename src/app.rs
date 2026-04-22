@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyEventKind};
 use tracing::{debug, error, info};
@@ -15,6 +17,7 @@ use std::time::{Duration, Instant};
 use crate::config::{AppConfig, Connection, Profiles};
 use crate::db::{self, Database, QueryResult, SchemaNode};
 use crate::keybindings::{Keybindings, LeaderEntry};
+use crate::recents::{RecentEntry, Recents};
 use crate::tree::TreeNode;
 use crate::vim::{self, Transition, Vim};
 
@@ -92,15 +95,36 @@ pub struct App<'a> {
     pub show_sidebar: bool,
     pub show_files: bool,
     pub show_recent: bool,
+    pub recents: Recents,
+    pub recents_selected: usize,
+    max_recents: usize,
+    // Files pane
+    pub file_tree: Vec<TreeNode>,
+    pub file_tree_state: ListState,
+    pub files_root: Option<PathBuf>,
+    pub file_paths: Vec<PathBuf>,
 }
 
 impl<'a> App<'a> {
-    pub fn new(config: AppConfig, profiles: Profiles) -> Self {
+    pub fn new(config: AppConfig, profiles: Profiles, files_root: Option<PathBuf>) -> Self {
         let (sidebar_items, label_to_profile) = build_sidebar_tree(&profiles);
 
         let mut state = ListState::default();
         if !sidebar_items.is_empty() {
             state.select(Some(0));
+        }
+
+        let (file_tree, file_paths, has_files) = if let Some(ref root) = files_root {
+            let tree = crate::files::build_file_tree(root);
+            let paths = crate::files::build_path_index(&tree, root);
+            let has = !tree.is_empty();
+            (tree, paths, has)
+        } else {
+            (vec![], vec![], false)
+        };
+        let mut file_tree_state = ListState::default();
+        if !file_tree.is_empty() {
+            file_tree_state.select(Some(0));
         }
 
         let mut editor = TextArea::default();
@@ -139,8 +163,15 @@ impl<'a> App<'a> {
             sidebar_filtering: false,
             leader_active: false,
             show_sidebar: true,
-            show_files: false,
+            show_files: has_files,
             show_recent: false,
+            recents: Recents::load(),
+            recents_selected: 0,
+            max_recents: config.max_recents,
+            file_tree,
+            file_tree_state,
+            files_root,
+            file_paths,
         }
     }
 
@@ -462,6 +493,7 @@ impl<'a> App<'a> {
                 actions.push(LeaderEntry { key: 'e', label: "Execute query" });
             }
             Focus::Recent => {
+                actions.push(LeaderEntry { key: 'd', label: "Delete recent" });
                 actions.push(LeaderEntry { key: 'e', label: "Execute query" });
             }
         }
@@ -469,6 +501,7 @@ impl<'a> App<'a> {
         actions.push(LeaderEntry { key: '2', label: "Toggle files" });
         actions.push(LeaderEntry { key: '3', label: "Toggle recent" });
         actions.push(LeaderEntry { key: 'h', label: "Help" });
+        actions.push(LeaderEntry { key: 'q', label: "Quit" });
         actions
     }
 
@@ -493,8 +526,8 @@ impl<'a> App<'a> {
                     }
                 }
             }
-            'o' | 'd' => {
-                // Connect / Disconnect: activate the selected connection node
+            'o' => {
+                // Connect: activate the selected connection node
                 if let Some(selected) = self.sidebar_state.selected() {
                     let flat = self.filtered_flat_nodes();
                     if let Some(node) = flat.get(selected) {
@@ -505,6 +538,22 @@ impl<'a> App<'a> {
                     }
                 }
             }
+            'd' => match self.focus {
+                Focus::Sidebar => {
+                    // Disconnect
+                    if let Some(selected) = self.sidebar_state.selected() {
+                        let flat = self.filtered_flat_nodes();
+                        if let Some(node) = flat.get(selected) {
+                            if node.depth == 0 {
+                                self.sidebar_filter.clear();
+                                self.toggle_connection(node.flat_index);
+                            }
+                        }
+                    }
+                }
+                Focus::Recent => self.delete_selected_recent(),
+                _ => {}
+            }
             'c' => {
                 self.results_visible = false;
                 self.focus = Focus::QueryEditor;
@@ -512,6 +561,7 @@ impl<'a> App<'a> {
             '1' => self.toggle_pane_visibility(Focus::Sidebar),
             '2' => self.toggle_pane_visibility(Focus::Files),
             '3' => self.toggle_pane_visibility(Focus::Recent),
+            'q' => self.running = false,
             _ => {}
         }
     }
@@ -583,9 +633,7 @@ impl<'a> App<'a> {
         let item_count = flat.len();
         let kb = &self.keys.sidebar;
 
-        if kb.quit.matches(key) {
-            self.running = false;
-        } else if kb.navigate_up.matches(key) {
+        if kb.navigate_up.matches(key) {
             let selected = self.sidebar_state.selected().unwrap_or(0);
             if selected > 0 {
                 self.sidebar_state.select(Some(selected - 1));
@@ -672,9 +720,7 @@ impl<'a> App<'a> {
             true
         };
 
-        if kb.quit.matches(key) {
-            self.running = false;
-        } else if kb.close.matches(key) {
+        if kb.close.matches(key) {
             self.results_visible = false;
             self.focus = Focus::QueryEditor;
         } else if kb.scroll_down.matches(key) {
@@ -699,16 +745,139 @@ impl<'a> App<'a> {
     }
 
     fn handle_files_key(&mut self, key: &crossterm::event::KeyEvent) {
-        use crossterm::event::KeyCode;
-        if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc {
-            self.running = false;
+        let flat = TreeNode::flatten_all(&self.file_tree);
+        let item_count = flat.len();
+        let kb = &self.keys.sidebar;
+
+        if kb.navigate_up.matches(key) {
+            let selected = self.file_tree_state.selected().unwrap_or(0);
+            if selected > 0 {
+                self.file_tree_state.select(Some(selected - 1));
+            }
+        } else if kb.navigate_down.matches(key) {
+            let selected = self.file_tree_state.selected().unwrap_or(0);
+            if selected + 1 < item_count {
+                self.file_tree_state.select(Some(selected + 1));
+            }
+        } else if kb.activate.matches(key) {
+            if let Some(selected) = self.file_tree_state.selected() {
+                if let Some(node) = flat.get(selected) {
+                    if node.has_children {
+                        self.files_expand_or_toggle(node.flat_index);
+                    } else {
+                        self.files_open_file(selected);
+                    }
+                }
+            }
+        } else if kb.expand.matches(key) {
+            if let Some(selected) = self.file_tree_state.selected() {
+                if let Some(node) = flat.get(selected) {
+                    if node.has_children && !node.expanded {
+                        self.files_expand_or_toggle(node.flat_index);
+                    }
+                }
+            }
+        } else if kb.collapse.matches(key) {
+            if let Some(selected) = self.file_tree_state.selected() {
+                if let Some(node) = flat.get(selected) {
+                    TreeNode::collapse_at_index(&mut self.file_tree, node.flat_index);
+                    self.rebuild_file_paths();
+                }
+            }
+        }
+    }
+
+    fn files_expand_or_toggle(&mut self, flat_index: usize) {
+        // Lazy-populate if sentinel
+        if crate::files::is_sentinel(&self.file_tree, flat_index) {
+            crate::files::populate_children(
+                &mut self.file_tree,
+                flat_index,
+                &self.file_paths,
+            );
+        }
+        TreeNode::toggle_at_index(&mut self.file_tree, flat_index);
+        self.rebuild_file_paths();
+    }
+
+    fn files_open_file(&mut self, flat_index: usize) {
+        let Some(path) = self.file_paths.get(flat_index).cloned() else {
+            return;
+        };
+        if !crate::files::is_text_file(&path) {
+            self.message = Some(Message {
+                text: format!("Not a text file: {}", path.display()),
+                level: MessageLevel::Info,
+            });
+            return;
+        }
+        match std::fs::read_to_string(&path) {
+            Ok(contents) => {
+                self.editor.select_all();
+                self.editor.cut();
+                self.editor.insert_str(&contents);
+                self.focus = Focus::QueryEditor;
+                self.vim = crate::vim::Vim::new(crate::vim::Mode::Normal);
+            }
+            Err(e) => {
+                self.show_error(format!("Failed to read {}: {e}", path.display()));
+            }
+        }
+    }
+
+    fn rebuild_file_paths(&mut self) {
+        if let Some(ref root) = self.files_root {
+            self.file_paths = crate::files::build_path_index(&self.file_tree, root);
         }
     }
 
     fn handle_recent_key(&mut self, key: &crossterm::event::KeyEvent) {
         use crossterm::event::KeyCode;
-        if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc {
-            self.running = false;
+        if key.code == KeyCode::Char('j') || key.code == KeyCode::Down {
+            if !self.recents.entries.is_empty() {
+                self.recents_selected = (self.recents_selected + 1)
+                    .min(self.recents.entries.len() - 1);
+                self.load_recent_into_results();
+            }
+        } else if key.code == KeyCode::Char('k') || key.code == KeyCode::Up {
+            self.recents_selected = self.recents_selected.saturating_sub(1);
+            if !self.recents.entries.is_empty() {
+                self.load_recent_into_results();
+            }
+        } else if key.code == KeyCode::Enter {
+            if let Some(entry) = self.recents.entries.get(self.recents_selected) {
+                let lines: Vec<&str> = entry.query.lines().collect();
+                self.editor = TextArea::new(lines.into_iter().map(String::from).collect());
+                self.editor.set_cursor_line_style(Style::default());
+                self.focus = Focus::QueryEditor;
+                self.vim = Vim::new(vim::Mode::Normal);
+            }
+        }
+    }
+
+    fn delete_selected_recent(&mut self) {
+        if !self.recents.entries.is_empty() {
+            self.recents.entries.remove(self.recents_selected);
+            if self.recents_selected >= self.recents.entries.len() && self.recents_selected > 0 {
+                self.recents_selected -= 1;
+            }
+            self.recents.save();
+            self.load_recent_into_results();
+        }
+    }
+
+    fn load_recent_into_results(&mut self) {
+        if let Some(entry) = self.recents.entries.get(self.recents_selected) {
+            self.query_result = entry.result.clone();
+            self.query_duration = Some(Duration::from_millis(entry.duration_ms));
+            self.results_has_more = false;
+            self.results_scroll_row = 0;
+            self.results_scroll_col = 0;
+            self.results_page = 0;
+            self.results_visible = entry.result.is_some();
+        } else {
+            self.query_result = None;
+            self.results_visible = false;
         }
     }
 
@@ -895,6 +1064,7 @@ impl<'a> App<'a> {
                         self.query_result = Some(query_result);
                         self.results_visible = true;
                         self.focus = Focus::Results;
+                        self.save_recent_entry(None);
                         // Refresh schema after DDL/DML that may have changed it
                         if !has_more {
                             if let Some(q) = &self.results_query {
@@ -906,12 +1076,35 @@ impl<'a> App<'a> {
                     }
                     Err(e) => {
                         error!(error = %e, "query failed");
+                        self.save_recent_entry(Some(e.clone()));
                         self.show_error(format!("Query error: {e}"));
                     }
                 }
             }
         }
         true
+    }
+
+    fn save_recent_entry(&mut self, error: Option<String>) {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let Some(query) = &self.results_query else { return };
+
+        let entry = RecentEntry {
+            query: query.clone(),
+            connection: self.connected_db.clone(),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            duration_ms: self.query_duration
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+            result: if error.is_none() { self.query_result.clone() } else { None },
+            error,
+        };
+        self.recents.add(entry, self.max_recents);
+        self.recents.save();
     }
 
     fn refresh_schema(&mut self) {
@@ -1012,7 +1205,7 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     fn test_app() -> App<'static> {
-        App::new(AppConfig::default(), Profiles::default())
+        App::new(AppConfig::default(), Profiles::default(), None)
     }
 
     fn test_profiles() -> Profiles {
@@ -1056,7 +1249,7 @@ mod tests {
 
     #[test]
     fn new_with_profiles() {
-        let app = App::new(AppConfig::default(), test_profiles());
+        let app = App::new(AppConfig::default(), test_profiles(), None);
         assert_eq!(app.sidebar_items.len(), 2);
         assert_eq!(app.sidebar_state.selected(), Some(0));
     }
@@ -1076,7 +1269,7 @@ mod tests {
 
     #[test]
     fn tab_cycles_focus() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.results_visible = true;
 
         assert_eq!(app.focus, Focus::Sidebar);
@@ -1096,7 +1289,7 @@ mod tests {
 
     #[test]
     fn tab_skips_results_when_hidden() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.results_visible = false;
         app.focus = Focus::QueryEditor;
 
@@ -1107,7 +1300,7 @@ mod tests {
 
     #[test]
     fn shift_tab_cycles_reverse() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.results_visible = true;
         app.focus = Focus::Sidebar;
 
@@ -1120,7 +1313,7 @@ mod tests {
 
     #[test]
     fn sidebar_navigate_down() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         assert_eq!(app.sidebar_state.selected(), Some(0));
         app.handle_sidebar_key(&key(KeyCode::Char('j')));
         assert_eq!(app.sidebar_state.selected(), Some(1));
@@ -1128,7 +1321,7 @@ mod tests {
 
     #[test]
     fn sidebar_navigate_up() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.sidebar_state.select(Some(1));
         app.handle_sidebar_key(&key(KeyCode::Char('k')));
         assert_eq!(app.sidebar_state.selected(), Some(0));
@@ -1136,7 +1329,7 @@ mod tests {
 
     #[test]
     fn sidebar_navigate_down_at_bottom() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.sidebar_state.select(Some(1)); // last item (2 profiles)
         app.handle_sidebar_key(&key(KeyCode::Char('j')));
         assert_eq!(app.sidebar_state.selected(), Some(1)); // unchanged
@@ -1144,23 +1337,23 @@ mod tests {
 
     #[test]
     fn sidebar_navigate_up_at_top() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         assert_eq!(app.sidebar_state.selected(), Some(0));
         app.handle_sidebar_key(&key(KeyCode::Char('k')));
         assert_eq!(app.sidebar_state.selected(), Some(0)); // unchanged
     }
 
     #[test]
-    fn sidebar_quit() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+    fn sidebar_q_does_not_quit() {
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         assert!(app.running);
         app.handle_sidebar_key(&key(KeyCode::Char('q')));
-        assert!(!app.running);
+        assert!(app.running);
     }
 
     #[test]
     fn sidebar_slash_starts_filter() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         assert!(!app.sidebar_filtering);
         app.handle_sidebar_key(&key(KeyCode::Char('/')));
         assert!(app.sidebar_filtering);
@@ -1171,7 +1364,7 @@ mod tests {
 
     #[test]
     fn filter_char_appends() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.sidebar_filtering = true;
         app.handle_sidebar_filter_key(&key(KeyCode::Char('t')));
         assert_eq!(app.sidebar_filter, "t");
@@ -1181,7 +1374,7 @@ mod tests {
 
     #[test]
     fn filter_backspace_pops() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.sidebar_filtering = true;
         app.sidebar_filter = "te".into();
         app.handle_sidebar_filter_key(&key(KeyCode::Backspace));
@@ -1190,7 +1383,7 @@ mod tests {
 
     #[test]
     fn filter_backspace_on_empty_exits() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.sidebar_filtering = true;
         app.sidebar_filter = "x".into();
         app.handle_sidebar_filter_key(&key(KeyCode::Backspace));
@@ -1201,7 +1394,7 @@ mod tests {
 
     #[test]
     fn filter_esc_clears_and_exits() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.sidebar_filtering = true;
         app.sidebar_filter = "test".into();
         app.handle_sidebar_filter_key(&key(KeyCode::Esc));
@@ -1211,7 +1404,7 @@ mod tests {
 
     #[test]
     fn filter_enter_keeps_filter_exits_mode() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.sidebar_filtering = true;
         app.sidebar_filter = "pg".into();
         app.handle_sidebar_filter_key(&key(KeyCode::Enter));
@@ -1223,7 +1416,7 @@ mod tests {
 
     #[test]
     fn results_scroll_down() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.query_result = Some(QueryResult {
             columns: vec!["id".into()],
             rows: (0..20).map(|i| vec![db::Value::Int(i)]).collect(),
@@ -1235,7 +1428,7 @@ mod tests {
 
     #[test]
     fn results_scroll_down_at_bottom() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.query_result = Some(QueryResult {
             columns: vec!["id".into()],
             rows: (0..5).map(|i| vec![db::Value::Int(i)]).collect(),
@@ -1247,7 +1440,7 @@ mod tests {
 
     #[test]
     fn results_scroll_up() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.results_scroll_row = 3;
         app.handle_results_key(&key(KeyCode::Char('k')));
         assert_eq!(app.results_scroll_row, 2);
@@ -1255,7 +1448,7 @@ mod tests {
 
     #[test]
     fn results_scroll_up_at_zero() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.results_scroll_row = 0;
         app.handle_results_key(&key(KeyCode::Char('k')));
         assert_eq!(app.results_scroll_row, 0);
@@ -1263,7 +1456,7 @@ mod tests {
 
     #[test]
     fn results_close() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.results_visible = true;
         app.focus = Focus::Results;
         app.handle_results_key(&key(KeyCode::Char('c')));
@@ -1272,18 +1465,18 @@ mod tests {
     }
 
     #[test]
-    fn results_quit() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+    fn results_q_does_not_quit() {
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.focus = Focus::Results;
         app.handle_results_key(&key(KeyCode::Char('q')));
-        assert!(!app.running);
+        assert!(app.running);
     }
 
     // --- Pagination ---
 
     #[test]
     fn next_page_noop_when_no_more() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.results_has_more = false;
         app.results_page = 0;
         app.results_next_page();
@@ -1292,7 +1485,7 @@ mod tests {
 
     #[test]
     fn prev_page_noop_at_zero() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.results_page = 0;
         app.results_prev_page();
         assert_eq!(app.results_page, 0);
@@ -1302,7 +1495,7 @@ mod tests {
 
     #[test]
     fn populate_schema_adds_children() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         let label = &app.sidebar_items[0].label.clone();
         let schema = vec![
             SchemaNode::group("Tables", vec![
@@ -1318,7 +1511,7 @@ mod tests {
 
     #[test]
     fn clear_schema_removes_children() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         let label = app.sidebar_items[0].label.clone();
         let schema = vec![SchemaNode::leaf("Tables")];
         app.populate_schema(&label, schema);
@@ -1331,7 +1524,7 @@ mod tests {
 
     #[test]
     fn poll_connected_success() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         let label = app.sidebar_items[0].label.clone();
 
         let (tx, rx) = mpsc::channel();
@@ -1355,7 +1548,7 @@ mod tests {
 
     #[test]
     fn poll_connected_failure() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         let label = app.sidebar_items[0].label.clone();
 
         let (tx, rx) = mpsc::channel();
@@ -1374,7 +1567,7 @@ mod tests {
 
     #[test]
     fn poll_query_success() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         let (tx, rx) = mpsc::channel();
         app.set_bg_receiver(rx);
 
@@ -1397,7 +1590,7 @@ mod tests {
 
     #[test]
     fn poll_disconnected_channel() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         let (tx, rx) = mpsc::channel();
         app.set_bg_receiver(rx);
         drop(tx); // disconnect the channel
@@ -1430,7 +1623,7 @@ mod tests {
 
     #[test]
     fn leader_key_activates() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         assert!(!app.leader_active);
         // Space is the default leader key, sidebar is default focus (normal context)
         app.handle_leader_key_press();
@@ -1439,7 +1632,7 @@ mod tests {
 
     #[test]
     fn leader_actions_query_editor() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.focus = Focus::QueryEditor;
         let actions = app.leader_actions();
         assert!(actions.iter().any(|a| a.key == 'e'), "execute");
@@ -1451,7 +1644,7 @@ mod tests {
 
     #[test]
     fn leader_actions_sidebar_on_connection() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.focus = Focus::Sidebar;
         // Default selection is index 0, which is a connection node (depth 0)
         let actions = app.leader_actions();
@@ -1463,7 +1656,7 @@ mod tests {
 
     #[test]
     fn leader_actions_sidebar_on_table() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.focus = Focus::Sidebar;
         // Populate schema so we have table nodes
         let label = app.sidebar_items[0].label.clone();
@@ -1485,7 +1678,7 @@ mod tests {
 
     #[test]
     fn leader_actions_sidebar_on_folder() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.focus = Focus::Sidebar;
         let label = app.sidebar_items[0].label.clone();
         app.populate_schema(&label, vec![
@@ -1505,7 +1698,7 @@ mod tests {
 
     #[test]
     fn leader_actions_sidebar_disconnect_when_connected() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.focus = Focus::Sidebar;
         app.connected_db = Some(app.sidebar_items[0].label.clone());
         let actions = app.leader_actions();
@@ -1515,7 +1708,7 @@ mod tests {
 
     #[test]
     fn leader_actions_results() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.focus = Focus::Results;
         let actions = app.leader_actions();
         assert!(actions.iter().any(|a| a.key == 'c'), "close");
@@ -1526,7 +1719,7 @@ mod tests {
 
     #[test]
     fn leader_action_format() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.focus = Focus::QueryEditor;
         app.editor.insert_str("select * from foo");
         app.handle_leader_action(&key(KeyCode::Char('f')));
@@ -1536,14 +1729,55 @@ mod tests {
 
     #[test]
     fn leader_action_help() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.handle_leader_action(&key(KeyCode::Char('h')));
         assert!(app.show_help);
     }
 
     #[test]
+    fn leader_action_quit() {
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        assert!(app.running);
+        app.handle_leader_action(&key(KeyCode::Char('q')));
+        assert!(!app.running);
+    }
+
+    #[test]
+    fn leader_q_quits_from_sidebar() {
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        app.focus = Focus::Sidebar;
+        assert!(app.running);
+        app.leader_active = true;
+        app.handle_leader_action(&key(KeyCode::Char('q')));
+        assert!(!app.running);
+    }
+
+    #[test]
+    fn leader_q_quits_from_results() {
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        app.focus = Focus::Results;
+        assert!(app.running);
+        app.leader_active = true;
+        app.handle_leader_action(&key(KeyCode::Char('q')));
+        assert!(!app.running);
+    }
+
+    #[test]
+    fn leader_actions_include_quit_always() {
+        for focus in [Focus::Sidebar, Focus::QueryEditor, Focus::Results] {
+            let mut app = App::new(AppConfig::default(), test_profiles(), None);
+            app.focus = focus;
+            let actions = app.leader_actions();
+            assert!(
+                actions.iter().any(|a| a.key == 'q'),
+                "quit missing from leader_actions for focus {focus:?}"
+            );
+        }
+    }
+
+    #[test]
     fn leader_action_close_results() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.focus = Focus::Results;
         app.results_visible = true;
         app.handle_leader_action(&key(KeyCode::Char('c')));
@@ -1553,7 +1787,7 @@ mod tests {
 
     #[test]
     fn leader_ignores_invalid_action_for_context() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.focus = Focus::Sidebar;
         // 'f' (format) is not available in sidebar context
         app.handle_leader_action(&key(KeyCode::Char('f')));
@@ -1564,7 +1798,7 @@ mod tests {
 
     #[test]
     fn leader_not_active_in_insert_mode() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.focus = Focus::QueryEditor;
         app.vim = Vim::new(vim::Mode::Insert);
         app.handle_leader_key_press();
@@ -1600,7 +1834,7 @@ mod tests {
 
     #[test]
     fn toggle_sidebar_hides_and_shows() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         assert!(app.show_sidebar);
         app.toggle_pane_visibility(Focus::Sidebar);
         assert!(!app.show_sidebar);
@@ -1610,7 +1844,7 @@ mod tests {
 
     #[test]
     fn toggle_files_hides_and_shows() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         assert!(!app.show_files);
         app.toggle_pane_visibility(Focus::Files);
         assert!(app.show_files);
@@ -1620,7 +1854,7 @@ mod tests {
 
     #[test]
     fn toggle_recent_hides_and_shows() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         assert!(!app.show_recent);
         app.toggle_pane_visibility(Focus::Recent);
         assert!(app.show_recent);
@@ -1630,7 +1864,7 @@ mod tests {
 
     #[test]
     fn toggle_focused_pane_moves_focus_to_editor() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.focus = Focus::Sidebar;
         app.toggle_pane_visibility(Focus::Sidebar);
         assert_eq!(app.focus, Focus::QueryEditor);
@@ -1638,7 +1872,7 @@ mod tests {
 
     #[test]
     fn toggle_on_moves_focus_to_pane() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.show_files = false;
         app.focus = Focus::QueryEditor;
         app.toggle_pane_visibility(Focus::Files);
@@ -1647,7 +1881,7 @@ mod tests {
 
     #[test]
     fn toggle_noop_for_query_editor() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.focus = Focus::QueryEditor;
         // QueryEditor is not toggleable
         app.toggle_pane_visibility(Focus::QueryEditor);
@@ -1658,7 +1892,7 @@ mod tests {
 
     #[test]
     fn focus_cycles_through_all_visible_panes() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.show_sidebar = true;
         app.show_files = true;
         app.show_recent = true;
@@ -1680,7 +1914,7 @@ mod tests {
 
     #[test]
     fn focus_skips_hidden_panes() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.show_sidebar = false;
         app.show_files = false;
         app.show_recent = false;
@@ -1694,7 +1928,7 @@ mod tests {
 
     #[test]
     fn focus_reverse_with_all_panes() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.show_sidebar = true;
         app.show_files = true;
         app.show_recent = true;
@@ -1716,7 +1950,7 @@ mod tests {
 
     #[test]
     fn visible_panes_default() {
-        let app = App::new(AppConfig::default(), test_profiles());
+        let app = App::new(AppConfig::default(), test_profiles(), None);
         // Default: sidebar + query editor
         let panes = app.visible_panes();
         assert_eq!(panes, vec![Focus::Sidebar, Focus::QueryEditor]);
@@ -1724,7 +1958,7 @@ mod tests {
 
     #[test]
     fn visible_panes_all() {
-        let mut app = App::new(AppConfig::default(), test_profiles());
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.show_sidebar = true;
         app.show_files = true;
         app.show_recent = true;
@@ -1737,6 +1971,253 @@ mod tests {
             Focus::Results,
             Focus::Recent,
         ]);
+    }
+
+    // --- Recents pane tests ---
+
+    fn app_with_recents(count: usize) -> App<'static> {
+        use crate::recents::RecentEntry;
+        let mut app = test_app();
+        app.focus = Focus::Recent;
+        app.show_recent = true;
+        app.recents = Recents::default();
+        for i in 0..count {
+            app.recents.entries.push(RecentEntry {
+                query: format!("SELECT {i}"),
+                connection: Some("testdb".into()),
+                timestamp: 1700000000 + i as u64,
+                duration_ms: 10,
+                result: Some(db::QueryResult {
+                    columns: vec!["x".into()],
+                    rows: vec![vec![db::Value::Int(i as i64)]],
+                }),
+                error: None,
+            });
+        }
+        app
+    }
+
+    #[test]
+    fn recent_j_moves_selection_down() {
+        let mut app = app_with_recents(3);
+        assert_eq!(app.recents_selected, 0);
+        app.handle_recent_key(&KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(app.recents_selected, 1);
+        app.handle_recent_key(&KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(app.recents_selected, 2);
+    }
+
+    #[test]
+    fn recent_j_clamps_at_end() {
+        let mut app = app_with_recents(2);
+        app.recents_selected = 1;
+        app.handle_recent_key(&KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(app.recents_selected, 1);
+    }
+
+    #[test]
+    fn recent_k_moves_selection_up() {
+        let mut app = app_with_recents(3);
+        app.recents_selected = 2;
+        app.handle_recent_key(&KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
+        assert_eq!(app.recents_selected, 1);
+    }
+
+    #[test]
+    fn recent_k_clamps_at_zero() {
+        let mut app = app_with_recents(3);
+        app.handle_recent_key(&KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
+        assert_eq!(app.recents_selected, 0);
+    }
+
+    #[test]
+    fn recent_enter_loads_query_into_editor() {
+        let mut app = app_with_recents(2);
+        app.recents_selected = 1;
+        app.handle_recent_key(&KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let text: String = app.editor.lines().join("\n");
+        assert_eq!(text, "SELECT 1");
+        assert_eq!(app.focus, Focus::QueryEditor);
+    }
+
+    #[test]
+    fn recent_leader_d_deletes_entry() {
+        let mut app = app_with_recents(3);
+        app.recents_selected = 1;
+        app.handle_leader_key_press();
+        app.handle_leader_action(&KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+        assert_eq!(app.recents.entries.len(), 2);
+        assert_eq!(app.recents.entries[0].query, "SELECT 0");
+        assert_eq!(app.recents.entries[1].query, "SELECT 2");
+    }
+
+    #[test]
+    fn recent_leader_d_clamps_selection_after_last() {
+        let mut app = app_with_recents(2);
+        app.recents_selected = 1;
+        app.handle_leader_key_press();
+        app.handle_leader_action(&KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+        assert_eq!(app.recents_selected, 0);
+        assert_eq!(app.recents.entries.len(), 1);
+    }
+
+    #[test]
+    fn recent_selection_populates_results() {
+        let mut app = app_with_recents(3);
+        app.handle_recent_key(&KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert!(app.results_visible);
+        let result = app.query_result.as_ref().unwrap();
+        assert_eq!(result.rows[0][0], db::Value::Int(1));
+    }
+
+    #[test]
+    fn recent_navigation_empty_list_is_noop() {
+        let mut app = app_with_recents(0);
+        app.handle_recent_key(&KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(app.recents_selected, 0);
+        app.handle_recent_key(&KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+        assert_eq!(app.recents.entries.len(), 0);
+    }
+}
+
+#[cfg(test)]
+mod files_tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use std::fs;
+    use tempfile::tempdir;
+
+    fn app_with_files(root: std::path::PathBuf) -> App<'static> {
+        App::new(AppConfig::default(), Profiles::default(), Some(root))
+    }
+
+    #[test]
+    fn new_with_path_shows_files() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("test.sql"), "SELECT 1").unwrap();
+        let app = app_with_files(dir.path().to_path_buf());
+        assert!(app.show_files);
+        assert!(!app.file_tree.is_empty());
+        assert_eq!(app.file_tree_state.selected(), Some(0));
+    }
+
+    #[test]
+    fn new_without_path_hides_files() {
+        let app = App::new(AppConfig::default(), Profiles::default(), None);
+        assert!(!app.show_files);
+        assert!(app.file_tree.is_empty());
+    }
+
+    #[test]
+    fn files_navigate_down_up() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("a.sql"), "").unwrap();
+        fs::write(dir.path().join("b.sql"), "").unwrap();
+        fs::write(dir.path().join("c.sql"), "").unwrap();
+        let mut app = app_with_files(dir.path().to_path_buf());
+        app.focus = Focus::Files;
+
+        assert_eq!(app.file_tree_state.selected(), Some(0));
+        app.handle_files_key(&KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(app.file_tree_state.selected(), Some(1));
+        app.handle_files_key(&KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(app.file_tree_state.selected(), Some(2));
+        // Clamp at end
+        app.handle_files_key(&KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(app.file_tree_state.selected(), Some(2));
+        // Navigate up
+        app.handle_files_key(&KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
+        assert_eq!(app.file_tree_state.selected(), Some(1));
+        // Clamp at start
+        app.handle_files_key(&KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
+        app.handle_files_key(&KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
+        assert_eq!(app.file_tree_state.selected(), Some(0));
+    }
+
+    #[test]
+    fn files_enter_expands_directory() {
+        let dir = tempdir().unwrap();
+        let sub = dir.path().join("subdir");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join("inner.sql"), "SELECT 1").unwrap();
+
+        let mut app = app_with_files(dir.path().to_path_buf());
+        app.focus = Focus::Files;
+
+        // subdir is at index 0 (dirs first), collapsed
+        assert!(!app.file_tree[0].expanded);
+        app.handle_files_key(&KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        // Now expanded with real children
+        assert!(app.file_tree[0].expanded);
+        assert_eq!(app.file_tree[0].children[0].label, "inner.sql");
+    }
+
+    #[test]
+    fn files_enter_opens_sql_file() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("query.sql"), "SELECT * FROM users").unwrap();
+
+        let mut app = app_with_files(dir.path().to_path_buf());
+        app.focus = Focus::Files;
+
+        app.handle_files_key(&KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let editor_text: String = app.editor.lines().join("\n");
+        assert_eq!(editor_text, "SELECT * FROM users");
+        assert_eq!(app.focus, Focus::QueryEditor);
+    }
+
+    #[test]
+    fn files_enter_rejects_non_text_file() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("data.bin"), &[0u8, 1, 2, 3]).unwrap();
+
+        let mut app = app_with_files(dir.path().to_path_buf());
+        app.focus = Focus::Files;
+
+        app.handle_files_key(&KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(app.message.is_some());
+        assert!(app.message.as_ref().unwrap().text.contains("Not a text file"));
+        assert_eq!(app.focus, Focus::Files);
+    }
+
+    #[test]
+    fn files_h_collapses_l_expands() {
+        let dir = tempdir().unwrap();
+        let sub = dir.path().join("subdir");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join("file.sql"), "").unwrap();
+
+        let mut app = app_with_files(dir.path().to_path_buf());
+        app.focus = Focus::Files;
+
+        // Expand with 'l'
+        app.handle_files_key(&KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE));
+        assert!(app.file_tree[0].expanded);
+
+        // Collapse with 'h'
+        app.handle_files_key(&KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+        assert!(!app.file_tree[0].expanded);
+    }
+
+    #[test]
+    fn files_q_does_not_quit() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("test.sql"), "").unwrap();
+        let mut app = app_with_files(dir.path().to_path_buf());
+        app.focus = Focus::Files;
+
+        assert!(app.running);
+        app.handle_files_key(&KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+        assert!(app.running);
+    }
+
+    #[test]
+    fn files_focus_cycles_when_visible() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("test.sql"), "").unwrap();
+        let app = app_with_files(dir.path().to_path_buf());
+        let panes = app.visible_panes();
+        assert!(panes.contains(&Focus::Files));
     }
 }
 

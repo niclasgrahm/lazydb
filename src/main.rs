@@ -2,8 +2,10 @@ mod app;
 mod cli;
 mod config;
 mod db;
+mod files;
 mod highlight;
 mod keybindings;
+mod recents;
 mod tree;
 mod ui;
 mod vim;
@@ -46,6 +48,14 @@ fn main() -> Result<()> {
         return cli::handle(cmd);
     }
 
+    let files_root = Some(match cli.path {
+        None => std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+        Some(p) if p == std::path::Path::new(".") => {
+            std::env::current_dir().unwrap_or(p)
+        }
+        Some(p) => std::fs::canonicalize(&p).unwrap_or(p),
+    });
+
     let app_config = config::AppConfig::load()?;
     if app_config.debug {
         init_tracing()?;
@@ -53,7 +63,7 @@ fn main() -> Result<()> {
     let profiles = config::Profiles::load()?;
 
     let terminal = ratatui::init();
-    let result = run(terminal, app_config, profiles);
+    let result = run(terminal, app_config, profiles, files_root);
     ratatui::restore();
     result
 }
@@ -62,8 +72,9 @@ fn run(
     mut terminal: DefaultTerminal,
     app_config: config::AppConfig,
     profiles: config::Profiles,
+    files_root: Option<std::path::PathBuf>,
 ) -> Result<()> {
-    let mut app = app::App::new(app_config, profiles);
+    let mut app = app::App::new(app_config, profiles, files_root);
 
     while app.running {
         terminal.draw(|frame| ui::draw(&mut app, frame))?;

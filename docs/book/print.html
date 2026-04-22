@@ -1,0 +1,1184 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>lazydb</title>
+        <meta name="robots" content="noindex">
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="Terminal UI database client — user documentation">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="favicon-8114d1fc.png">
+        <link rel="stylesheet" href="css/variables-8adf115d.css">
+        <link rel="stylesheet" href="css/general-2459343d.css">
+        <link rel="stylesheet" href="css/chrome-ae938929.css">
+        <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex-0dd2a359.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc-d45d89d2.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">lazydb</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="getting-started"><a class="header" href="#getting-started">Getting Started</a></h1>
+<h2 id="what-is-lazydb"><a class="header" href="#what-is-lazydb">What is lazydb?</a></h2>
+<p>lazydb is a terminal UI database client inspired by lazygit and lazydocker. It provides a vim-style query editor, connection profiles, and an intuitive sidebar for browsing database schemas — all from your terminal.</p>
+<!-- TODO: screenshot of the full UI -->
+<h2 id="prerequisites"><a class="header" href="#prerequisites">Prerequisites</a></h2>
+<ul>
+<li>A terminal emulator with true color support (e.g., iTerm2, kitty, alacritty, or any modern terminal with VT100 support)</li>
+<li>Cargo (to build from source) or the <code>lazydb</code> binary on your system</li>
+</ul>
+<h2 id="installation"><a class="header" href="#installation">Installation</a></h2>
+<h3 id="from-source"><a class="header" href="#from-source">From source</a></h3>
+<pre><code class="language-bash">cargo install --path .
+</code></pre>
+<h3 id="build-and-run-from-source"><a class="header" href="#build-and-run-from-source">Build and run from source</a></h3>
+<pre><code class="language-bash">git clone https://github.com/your-org/lazydb.git
+cd lazydb
+cargo run
+</code></pre>
+<h3 id="using-docker"><a class="header" href="#using-docker">Using Docker</a></h3>
+<p>A <code>docker-compose.yaml</code> is provided for quickly spinning up development databases. See the <a href="#faq--troubleshooting">FAQ &amp; Troubleshooting</a> section for details.</p>
+<h2 id="first-launch"><a class="header" href="#first-launch">First Launch</a></h2>
+<p>When you start lazydb for the first time, you will see:</p>
+<ul>
+<li><strong>A blank connections sidebar</strong> — no database profiles are configured yet.</li>
+<li><strong>A query editor</strong> with a placeholder message.</li>
+<li><strong>A status bar</strong> at the bottom showing the current pane.</li>
+</ul>
+<h2 id="quick-example-connect-duckdb"><a class="header" href="#quick-example-connect-duckdb">Quick Example: Connect DuckDB</a></h2>
+<p>DuckDB is the easiest way to try lazydb. It requires no server setup.</p>
+<h3 id="1-create-a-connection-profile"><a class="header" href="#1-create-a-connection-profile">1. Create a connection profile</a></h3>
+<p>Create <code>~/.config/lazydb/profiles.toml</code> with:</p>
+<pre><code class="language-toml">[connections.mydb]
+type = "duckdb"
+path = "/tmp/example.duckdb"
+</code></pre>
+<h3 id="2-launch-lazydb"><a class="header" href="#2-launch-lazydb">2. Launch lazydb</a></h3>
+<pre><code class="language-bash">lazydb
+</code></pre>
+<p>Press <code>Enter</code> on the <code>mydb (duckdb)</code> entry in the connections sidebar. If the file does not exist, DuckDB creates it automatically.</p>
+<h3 id="3-execute-a-query"><a class="header" href="#3-execute-a-query">3. Execute a query</a></h3>
+<p>Tab to the query editor, type a SQL query (e.g., <code>SELECT 1</code>), then press <code>Ctrl+E</code> to run it.</p>
+<!-- TODO: screenshot of the results pane -->
+<p>That’s it — you’re connected. See <a href="#connection-profiles-1">Configuration</a> for connecting to other database types.</p>
+<h2 id="navigation-overview"><a class="header" href="#navigation-overview">Navigation Overview</a></h2>
+<p>lazydb uses three main panels:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Panel</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td>Sidebar</td><td>Browse databases and file trees</td></tr>
+<tr><td>Query Editor</td><td>Write and edit SQL queries (vim)</td></tr>
+<tr><td>Results</td><td>View query output (table format)</td></tr>
+</tbody>
+</table>
+</div>
+<p>Use <code>Tab</code> and <code>Shift+Tab</code> to cycle focus between panels. Press <code>Ctrl+E</code> at any time to execute the query.</p>
+<p>See <a href="#recent-queries-1">Panels</a> for a full description of each panel.</p>
+<p>See <a href="#query-editor-2">Keybindings</a> for the complete keybinding reference.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="configuration"><a class="header" href="#configuration">Configuration</a></h1>
+<p>lazydb reads two TOML files from <code>~/.config/lazydb/</code>: <code>config.toml</code> (application settings) and <code>profiles.toml</code> (database connections). If a file does not exist, lazydb uses sensible defaults.</p>
+<h2 id="application-config"><a class="header" href="#application-config-1">Application Config</a></h2>
+<p><strong>File</strong>: <code>~/.config/lazydb/config.toml</code></p>
+<p>All fields are optional — every field has a sensible default and only needs to be set if you want to customize it.</p>
+<pre><code class="language-toml"># Width of the connections sidebar panel (10-50, default: 25)
+sidebar_width = 25
+
+# Enable debug logging (writes to ~/.config/lazydb/debug.log)
+debug = false
+
+# Maximum number of recent queries to keep (default: 10)
+max_recents = 10
+
+# Override default keybindings
+[keybindings]
+leader_key = "space"
+
+[keybindings.global]
+execute_query = "ctrl+e"
+format_query = "ctrl+f"
+next_pane = "tab"
+prev_pane = "shift+tab"
+show_help = "?"
+
+[keybindings.sidebar]
+navigate_up = ["k", "up"]
+navigate_down = ["j", "down"]
+expand = ["l", "right"]
+collapse = ["h", "left"]
+activate = "enter"
+preview = "s"
+quit = ["q", "esc"]
+
+[keybindings.results]
+scroll_up = ["k", "up"]
+scroll_down = ["j", "down"]
+scroll_left = ["h", "left"]
+scroll_right = ["l", "right"]
+next_page = ["n", "pagedown"]
+prev_page = ["p", "pageup"]
+close = ["c", "esc"]
+quit = "q"
+</code></pre>
+<h3 id="fields"><a class="header" href="#fields">Fields</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>sidebar_width</code></td><td>u16</td><td>25</td><td>Width of the connections sidebar as a percentage of the total width</td></tr>
+<tr><td><code>debug</code></td><td>bool</td><td>false</td><td>Enable debug logging to <code>~/.config/lazydb/debug.log</code></td></tr>
+<tr><td><code>max_recents</code></td><td>usize</td><td>10</td><td>Maximum number of recent queries to keep</td></tr>
+<tr><td><code>keybindings</code></td><td>object</td><td>(see below)</td><td>Keybinding overrides</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="keybinding-format"><a class="header" href="#keybinding-format">Keybinding Format</a></h3>
+<p>Keybindings accept a string for a single key, or an array of strings for alternative keys:</p>
+<pre><code class="language-toml"># Single key
+execute_query = "ctrl+e"
+
+# Multiple alternatives — any matching key fires the action
+navigate_up = ["k", "up"]
+navigate_down = ["j", "down"]
+
+# Modifiers: ctrl, shift, alt (combined with +)
+leader_key = "ctrl+l"
+
+# Special keys: tab, enter, esc, up, down, left, right, space, backspace
+quit = ["q", "esc"]
+</code></pre>
+<h2 id="connection-profiles"><a class="header" href="#connection-profiles-1">Connection Profiles</a></h2>
+<p><strong>File</strong>: <code>~/.config/lazydb/profiles.toml</code></p>
+<p>Each connection is defined under a <code>[connections.&lt;name&gt;]</code> section. The <code>name</code> is used as the display label in the sidebar. Connection type is specified via the <code>type</code> field.</p>
+<h3 id="duckdb"><a class="header" href="#duckdb">DuckDB</a></h3>
+<pre><code class="language-toml">[connections.mydb]
+type = "duckdb"
+path = "/path/to/database.duckdb"
+</code></pre>
+<!-- TODO: screenshot of DuckDB connection config -->
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Required</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>path</code></td><td>yes</td><td>—</td><td>Path to the DuckDB file. Use <code>:memory:</code> for an in-memory database.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="postgresql"><a class="header" href="#postgresql">PostgreSQL</a></h3>
+<pre><code class="language-toml">[connections.pg]
+type = "postgres"
+host = "localhost"
+port = 5432
+user = "postgres"
+database = "mydb"
+</code></pre>
+<!-- TODO: screenshot of PostgreSQL connection config -->
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Required</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>host</code></td><td>yes</td><td>—</td><td>PostgreSQL hostname</td></tr>
+<tr><td><code>port</code></td><td>no</td><td>5432</td><td>PostgreSQL port</td></tr>
+<tr><td><code>user</code></td><td>yes</td><td>—</td><td>Database username</td></tr>
+<tr><td><code>password</code></td><td>no</td><td>(none)</td><td>Database password</td></tr>
+<tr><td><code>database</code></td><td>yes</td><td>—</td><td>Database name</td></tr>
+<tr><td><code>schema</code></td><td>no</td><td><code>public</code></td><td>Default search schema</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="clickhouse"><a class="header" href="#clickhouse">ClickHouse</a></h3>
+<pre><code class="language-toml">[connections.ch]
+type = "clickhouse"
+url = "http://localhost:8123"
+user = "default"
+database = "default"
+</code></pre>
+<!-- TODO: screenshot of ClickHouse connection config -->
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Required</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>url</code></td><td>no</td><td><code>http://localhost:8123</code></td><td>ClickHouse HTTP URL</td></tr>
+<tr><td><code>user</code></td><td>no</td><td><code>default</code></td><td>ClickHouse user</td></tr>
+<tr><td><code>password</code></td><td>no</td><td>(none)</td><td>ClickHouse password</td></tr>
+<tr><td><code>database</code></td><td>no</td><td><code>default</code></td><td>Default database</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="snowflake"><a class="header" href="#snowflake">Snowflake</a></h3>
+<p>Snowflake supports three authentication methods: password, OAuth, and browser login.</p>
+<h4 id="password-authentication"><a class="header" href="#password-authentication">Password authentication</a></h4>
+<pre><code class="language-toml">[connections.sf]
+type = "snowflake"
+account = "xy12345"
+auth = "password"
+user = "user@example.com"
+password = "your_password"
+database = "PROD"
+</code></pre>
+<h4 id="oauth-authentication"><a class="header" href="#oauth-authentication">OAuth authentication</a></h4>
+<pre><code class="language-toml">[connections.sf_oauth]
+type = "snowflake"
+account = "xy12345"
+auth = "oauth"
+oauth_token = "your_oauth_token"
+database = "PROD"
+</code></pre>
+<h4 id="browser-authentication-recommended"><a class="header" href="#browser-authentication-recommended">Browser authentication (recommended)</a></h4>
+<pre><code class="language-toml">[connections.sf_browser]
+type = "snowflake"
+account = "xy12345"
+auth = "browser"
+user = "user@example.com"
+database = "PROD"
+</code></pre>
+<!-- TODO: screenshot of Snowflake connection config -->
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Required</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>account</code></td><td>yes</td><td>—</td><td>Snowflake account identifier</td></tr>
+<tr><td><code>auth</code></td><td>yes</td><td>—</td><td><code>password</code>, <code>oauth</code>, or <code>browser</code></td></tr>
+<tr><td><code>user</code></td><td>yes</td><td>—</td><td>Snowflake username</td></tr>
+<tr><td><code>password</code></td><td>yes*</td><td>—</td><td>Auth type <code>password</code> only</td></tr>
+<tr><td><code>oauth_token</code></td><td>yes*</td><td>—</td><td>Auth type <code>oauth</code> only</td></tr>
+<tr><td><code>database</code></td><td>yes</td><td>—</td><td>Snowflake database</td></tr>
+<tr><td><code>warehouse</code></td><td>no</td><td>—</td><td>Snowflake warehouse</td></tr>
+<tr><td><code>schema</code></td><td>no</td><td>—</td><td>Database schema</td></tr>
+<tr><td><code>role</code></td><td>no</td><td>—</td><td>Snowflake role</td></tr>
+</tbody>
+</table>
+</div>
+<p>* <code>user</code> and <code>database</code> are always required. One of <code>password</code> or <code>oauth_token</code> is required depending on auth method.</p>
+<h3 id="databricks"><a class="header" href="#databricks">Databricks</a></h3>
+<pre><code class="language-toml">[connections.databricks]
+type = "databricks"
+host = "adb-1234567890123456.7.azuredatabricks.net"
+token = "dapi0123456789abcdef"
+warehouse_id = "abc123def456"
+catalog = "main"
+schema = "default"
+</code></pre>
+<!-- TODO: screenshot of Databricks connection config -->
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Required</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>host</code></td><td>yes</td><td>—</td><td>Databricks workspace host</td></tr>
+<tr><td><code>token</code></td><td>yes</td><td>—</td><td>Databricks personal access token</td></tr>
+<tr><td><code>warehouse_id</code></td><td>yes</td><td>—</td><td>Warehouse ID</td></tr>
+<tr><td><code>catalog</code></td><td>no</td><td>—</td><td>Databricks catalog</td></tr>
+<tr><td><code>schema</code></td><td>no</td><td>—</td><td>Database schema</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="putting-it-all-together"><a class="header" href="#putting-it-all-together">Putting it all together</a></h3>
+<pre><code class="language-toml"># ~/.config/lazydb/profiles.toml
+
+[connections.local]
+type = "duckdb"
+path = "/tmp/dev.duckdb"
+
+[connections.production_pg]
+type = "postgres"
+host = "db.example.com"
+port = 5432
+user = "app_user"
+password = "s3cret"
+database = "production"
+schema = "public"
+
+[connections.analytics]
+type = "clickhouse"
+url = "http://ch.example.com:8123"
+user = "analyst"
+database = "analytics"
+
+[connections.sf]
+type = "snowflake"
+account = "xy12345"
+auth = "browser"
+user = "user@example.com"
+database = "PROD"
+warehouse = "ANALYTICS_WH"
+schema = "PUBLIC"
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="application-config-1"><a class="header" href="#application-config-1">Application Config</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="connection-profiles-1"><a class="header" href="#connection-profiles-1">Connection Profiles</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="panels"><a class="header" href="#panels">Panels</a></h1>
+<p>lazydb has five panels that you can navigate between and toggle visibility. Only the Query Editor is always visible.</p>
+<!-- TODO: screenshot of the full UI with all panels visible -->
+<h2 id="connections-sidebar"><a class="header" href="#connections-sidebar-1">Connections Sidebar</a></h2>
+<p>The connections sidebar lists your configured database connections. Each connection expands to show its schema (tables, views, etc.) once connected.</p>
+<h3 id="navigation"><a class="header" href="#navigation">Navigation</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Action</th><th>Key</th></tr>
+</thead>
+<tbody>
+<tr><td>Move up / down</td><td><code>k</code> / <code>j</code> or arrow keys</td></tr>
+<tr><td>Expand / collapse</td><td><code>l</code> / <code>h</code> or arrow keys</td></tr>
+<tr><td>Select (connect / toggle)</td><td><code>Enter</code></td></tr>
+<tr><td>Filter nodes</td><td><code>/</code> to start typing a filter</td></tr>
+<tr><td>Leave filter mode</td><td><code>Esc</code></td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="connecting-to-a-database"><a class="header" href="#connecting-to-a-database">Connecting to a database</a></h3>
+<ol>
+<li>Navigate to a connection name (e.g., <code>mydb (postgres)</code>)</li>
+<li>Press <code>Enter</code></li>
+<li>A loading spinner appears while the connection is established in the background</li>
+<li>On success, the schema tree populates beneath the connection</li>
+</ol>
+<h3 id="disconnecting"><a class="header" href="#disconnecting">Disconnecting</a></h3>
+<ol>
+<li>Navigate to a connected database</li>
+<li>Press <code>Enter</code> (same key — it disconnects if already connected)</li>
+</ol>
+<h3 id="previewing-tables-and-views"><a class="header" href="#previewing-tables-and-views">Previewing tables and views</a></h3>
+<p>Press <code>s</code> on any table or view node in the sidebar to automatically generate a <code>SELECT * FROM &lt;table&gt; LIMIT 10</code> query in the editor.</p>
+<!-- TODO: screenshot of sidebar with expanded tables -->
+<h2 id="file-browser"><a class="header" href="#file-browser-1">File Browser</a></h2>
+<p>The file browser lets you browse your local filesystem and open SQL files (or other text files) directly into the query editor.</p>
+<h3 id="navigation-1"><a class="header" href="#navigation-1">Navigation</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Action</th><th>Key</th></tr>
+</thead>
+<tbody>
+<tr><td>Move up / down</td><td><code>k</code> / <code>j</code> or arrow keys</td></tr>
+<tr><td>Expand / collapse directories</td><td><code>l</code> / <code>h</code> or arrow keys</td></tr>
+<tr><td>Open file</td><td><code>Enter</code></td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="file-types"><a class="header" href="#file-types">File types</a></h3>
+<p>Only text files are opens into the editor. Supported extensions:</p>
+<pre><code>sql, txt, csv, json, toml, yaml, yml, md, py, sh, rs, go, js, ts, lua, cfg, ini, xml, html
+</code></pre>
+<h3 id="viewing-the-file-browser"><a class="header" href="#viewing-the-file-browser">Viewing the file browser</a></h3>
+<p>It is toggled with <code>leader 2</code>. If you launch <code>lazydb</code> with a path argument (e.g., <code>lazydb /path/to/queries/</code>), the files pane is shown by default.</p>
+<!-- TODO: screenshot of file browser -->
+<h2 id="query-editor"><a class="header" href="#query-editor-1">Query Editor</a></h2>
+<p>The query editor is the central panel of lazydb. You write SQL here and execute it.</p>
+<h3 id="placeholder"><a class="header" href="#placeholder">Placeholder</a></h3>
+<p>When no files are loaded, the editor shows a placeholder:</p>
+<blockquote>
+<p>“Press Tab to switch here and start typing SQL…”</p>
+</blockquote>
+<h3 id="vim-modes"><a class="header" href="#vim-modes">Vim modes</a></h3>
+<p>The editor supports full vim keybindings. See <a href="#entering-insert-mode">Vim Editor</a> for the complete reference.</p>
+<p>The status bar at the bottom shows the current mode:</p>
+<ul>
+<li><code>NORMAL</code> — default mode for navigation and vim commands</li>
+<li><code>INSERT</code> — text entry mode</li>
+<li><code>VISUAL</code> — text selection mode</li>
+<li><code>OPERATOR(&lt;key&gt;)</code> — waiting for the completion key (e.g., after pressing <code>d</code>)</li>
+</ul>
+<!-- TODO: screenshot of the query editor with vim mode indicator -->
+<h3 id="formatting-sql"><a class="header" href="#formatting-sql">Formatting SQL</a></h3>
+<p>Press <code>Ctrl+F</code> (or <code>leader f</code>) to format the current query using <code>sqlformat</code> with 2-space indentation and uppercase keywords.</p>
+<h3 id="executing-queries"><a class="header" href="#executing-queries">Executing queries</a></h3>
+<p>Press <code>Ctrl+E</code> from anywhere to execute the query. The results appear in the Results panel.</p>
+<h2 id="results"><a class="header" href="#results-1">Results</a></h2>
+<p>The Results panel displays query output in a table format. It appears below the other panels when you execute a <code>SELECT</code> query.</p>
+<h3 id="navigation-2"><a class="header" href="#navigation-2">Navigation</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Action</th><th>Key</th></tr>
+</thead>
+<tbody>
+<tr><td>Scroll up / down</td><td><code>k</code> / <code>j</code> or arrow keys</td></tr>
+<tr><td>Scroll left / right</td><td><code>h</code> / <code>l</code> or arrow keys</td></tr>
+<tr><td>Next page</td><td><code>n</code> / <code>pagedown</code></td></tr>
+<tr><td>Previous page</td><td><code>p</code> / <code>pageup</code></td></tr>
+<tr><td>Close &amp; return to editor</td><td><code>c</code> / <code>Esc</code></td></tr>
+<tr><td>Quit</td><td><code>q</code></td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="pagination"><a class="header" href="#pagination">Pagination</a></h3>
+<p>Large result sets are paginated automatically (100 rows per page). The status bar shows a <code>More...</code> indicator when additional pages are available.</p>
+<h3 id="column-width"><a class="header" href="#column-width">Column width</a></h3>
+<p>Columns auto-size to their widest content. When columns overflow the viewport, use horizontal scrolling.</p>
+<!-- TODO: screenshot of the results panel -->
+<h2 id="recent-queries"><a class="header" href="#recent-queries-1">Recent Queries</a></h2>
+<p>The Recent Queries panel shows a history of your last queries, along with execution time and (if successful) the result cached from when the query ran.</p>
+<h3 id="viewing-recent-queries"><a class="header" href="#viewing-recent-queries">Viewing recent queries</a></h3>
+<p>Toggle the panel with <code>leader 3</code>. Recent queries appear sorted by most recent, with relative timestamps (e.g., <code>5m ago</code>).</p>
+<h3 id="navigating"><a class="header" href="#navigating">Navigating</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Action</th><th>Key</th></tr>
+</thead>
+<tbody>
+<tr><td>Select up / down</td><td><code>k</code> / <code>j</code> or arrow keys</td></tr>
+<tr><td>Replay into editor</td><td><code>Enter</code></td></tr>
+<tr><td>Delete selected entry</td><td><code>d</code></td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="replaying-queries"><a class="header" href="#replaying-queries">Replaying queries</a></h3>
+<p>Press <code>Enter</code> on a recent query entry to load the query into the editor, along with the cached result and execution time. This lets you review, modify, and re-run previous queries.</p>
+<h3 id="deleting-entries"><a class="header" href="#deleting-entries">Deleting entries</a></h3>
+<p>Press <code>d</code> to remove the selected recent entry and update the list.</p>
+<!-- TODO: screenshot of the recent queries panel -->
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="connections-sidebar-1"><a class="header" href="#connections-sidebar-1">Connections Sidebar</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="file-browser-1"><a class="header" href="#file-browser-1">File Browser</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="query-editor-1"><a class="header" href="#query-editor-1">Query Editor</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="results-1"><a class="header" href="#results-1">Results</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="recent-queries-1"><a class="header" href="#recent-queries-1">Recent Queries</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="keybindings"><a class="header" href="#keybindings">Keybindings</a></h1>
+<p>All default keybindings are listed below. You can override any of them in <code>~/.config/lazydb/config.toml</code>.</p>
+<!-- TODO: screenshot showing the help overlay -->
+<h2 id="global-keybindings"><a class="header" href="#global-keybindings">Global Keybindings</a></h2>
+<p>Always available (except when in vim insert mode or loading):</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>Ctrl+E</code></td><td>Execute query</td></tr>
+<tr><td><code>Ctrl+F</code></td><td>Format query</td></tr>
+<tr><td><code>Tab</code></td><td>Next focus pane</td></tr>
+<tr><td><code>Shift+Tab</code></td><td>Previous focus pane</td></tr>
+<tr><td><code>?</code></td><td>Toggle help overlay</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="sidebar-keybindings"><a class="header" href="#sidebar-keybindings">Sidebar Keybindings</a></h2>
+<p>When the connections sidebar is focused:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>k</code> / <code>Up</code></td><td>Navigate up</td></tr>
+<tr><td><code>j</code> / <code>Down</code></td><td>Navigate down</td></tr>
+<tr><td><code>l</code> / <code>Right</code></td><td>Expand</td></tr>
+<tr><td><code>h</code> / <code>Left</code></td><td>Collapse</td></tr>
+<tr><td><code>Enter</code></td><td>Connect / toggle connection</td></tr>
+<tr><td><code>s</code></td><td>Preview table / view</td></tr>
+<tr><td><code>/</code></td><td>Start filtering</td></tr>
+<tr><td><code>q</code> / <code>Esc</code></td><td>Quit</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="results-keybindings"><a class="header" href="#results-keybindings">Results Keybindings</a></h2>
+<p>When the results panel is focused:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>k</code> / <code>Up</code></td><td>Scroll up</td></tr>
+<tr><td><code>j</code> / <code>Down</code></td><td>Scroll down</td></tr>
+<tr><td><code>h</code> / <code>Left</code></td><td>Scroll left</td></tr>
+<tr><td><code>l</code> / <code>Right</code></td><td>Scroll right</td></tr>
+<tr><td><code>n</code> / <code>PageDown</code></td><td>Next page</td></tr>
+<tr><td><code>p</code> / <code>PageUp</code></td><td>Previous page</td></tr>
+<tr><td><code>c</code> / <code>Esc</code></td><td>Close results, return to editor</td></tr>
+<tr><td><code>q</code></td><td>Quit</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="query-editor-keys"><a class="header" href="#query-editor-keys">Query Editor Keys</a></h2>
+<p>The query editor uses full vim keybindings. Key entry points into each mode:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>i</code></td><td>Enter insert mode (cursor stays)</td></tr>
+<tr><td><code>a</code></td><td>Enter insert mode (cursor advances)</td></tr>
+<tr><td><code>o</code></td><td>Open new line below, insert mode</td></tr>
+<tr><td><code>A</code></td><td>Enter insert mode at end of line</td></tr>
+<tr><td><code>I</code></td><td>Enter insert mode at start of line</td></tr>
+<tr><td><code>Esc</code></td><td>Return to normal mode</td></tr>
+<tr><td><code>Ctrl+C</code></td><td>Return to normal mode</td></tr>
+</tbody>
+</table>
+</div>
+<p>See <a href="#entering-insert-mode">Vim Editor</a> for the complete vim keybinding reference.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="global"><a class="header" href="#global">Global</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="sidebar"><a class="header" href="#sidebar">Sidebar</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="results-2"><a class="header" href="#results-2">Results</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="query-editor-2"><a class="header" href="#query-editor-2">Query Editor</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="leader-key"><a class="header" href="#leader-key">Leader Key</a></h1>
+<p>The leader key is the primary way to access context-sensitive actions in lazydb. Press the leader key (default: <code>Space</code>) to open a context menu, then press the displayed key to execute the corresponding action.</p>
+<!-- TODO: screenshot of the leader key menu -->
+<h2 id="how-it-works"><a class="header" href="#how-it-works-1">How It Works</a></h2>
+<p>The leader key system works like vim’s leader key:</p>
+<ol>
+<li>Press <code>Space</code> (or your configured leader key) while not in insert mode</li>
+<li>A menu appears in the bottom-right corner showing available actions</li>
+<li>Press the key shown in the menu to execute the action</li>
+<li>The menu closes after executing, or when you press another key</li>
+</ol>
+<p>The menu is context-sensitive — available actions change depending on which panel is currently focused.</p>
+<h2 id="leader-actions-by-pane"><a class="header" href="#leader-actions-by-pane-1">Leader Actions by Pane</a></h2>
+<p>When focused on the <strong>Connections sidebar</strong>:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>o</code></td><td>Connect to database</td></tr>
+<tr><td><code>d</code></td><td>Disconnect from database</td></tr>
+<tr><td><code>s</code></td><td>Preview table / view</td></tr>
+<tr><td><code>e</code></td><td>Execute query</td></tr>
+</tbody>
+</table>
+</div>
+<p>When focused on the <strong>Query Editor</strong>:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>e</code></td><td>Execute query</td></tr>
+<tr><td><code>f</code></td><td>Format query</td></tr>
+</tbody>
+</table>
+</div>
+<p>When focused on the <strong>Results</strong> panel:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>c</code></td><td>Close results</td></tr>
+<tr><td><code>e</code></td><td>Execute query</td></tr>
+</tbody>
+</table>
+</div>
+<p>When focused on the <strong>Files</strong> panel:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>e</code></td><td>Execute query</td></tr>
+</tbody>
+</table>
+</div>
+<p>When focused on <strong>Recent Queries</strong>:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>d</code></td><td>Delete recent</td></tr>
+<tr><td><code>e</code></td><td>Execute query</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="quick-pane-toggles"><a class="header" href="#quick-pane-toggles-1">Quick Pane Toggles</a></h2>
+<p>The leader key provides quick ways to toggle panel visibility regardless of which panel is focused:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Panel</th></tr>
+</thead>
+<tbody>
+<tr><td><code>1</code></td><td>Toggle connections sidebar</td></tr>
+<tr><td><code>2</code></td><td>Toggle file browser</td></tr>
+<tr><td><code>3</code></td><td>Toggle recent queries</td></tr>
+</tbody>
+</table>
+</div>
+<p>For example, pressing <code>Space 2</code> hides the file browser if it’s visible (or shows it if hidden).</p>
+<h2 id="changing-the-leader-key"><a class="header" href="#changing-the-leader-key">Changing the Leader Key</a></h2>
+<p>Edit <code>~/.config/lazydb/config.toml</code>:</p>
+<pre><code class="language-toml">[keybindings]
+leader_key = "\\"
+</code></pre>
+<p>Any key or key combination works as the leader key. Common alternatives:</p>
+<pre><code class="language-toml">leader_key = "\\"         # Backslash
+leader_key = "ctrl+l"    # Ctrl+L
+leader_key = ";"          # Semicolon
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="how-it-works-1"><a class="header" href="#how-it-works-1">How It Works</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="leader-actions-by-pane-1"><a class="header" href="#leader-actions-by-pane-1">Leader Actions by Pane</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="quick-pane-toggles-1"><a class="header" href="#quick-pane-toggles-1">Quick Pane Toggles</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="vim-editor"><a class="header" href="#vim-editor">Vim Editor</a></h1>
+<p>The query editor supports full vim keybindings. When you first open lazydb, the editor starts in Normal mode.</p>
+<!-- TODO: screenshot showing the vim mode indicator in the status bar -->
+<h2 id="modes"><a class="header" href="#modes-1">Modes</a></h2>
+<p>lazydb’s query editor uses four vim modes:</p>
+<ul>
+<li><strong>Normal</strong> — Default mode. Use vim movements and operators. No text is inserted.</li>
+<li><strong>Insert</strong> — Type to insert text. Press <code>Esc</code> or <code>Ctrl+C</code> to return to Normal mode.</li>
+<li><strong>Visual</strong> — Select text. Press <code>y</code> to yank (copy), <code>d</code> to delete, or <code>c</code> to delete and enter Insert mode.</li>
+<li><strong>Operator-pending</strong> — After pressing an operator key (<code>d</code>, <code>y</code>, or <code>c</code>), the editor waits for a motion key to complete the action.</li>
+</ul>
+<p>The current mode is displayed in the status bar at the bottom of the screen.</p>
+<h2 id="moving-the-cursor"><a class="header" href="#moving-the-cursor-1">Moving the Cursor</a></h2>
+<h3 id="basic-movement"><a class="header" href="#basic-movement">Basic Movement</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>h</code></td><td>Left</td></tr>
+<tr><td><code>j</code></td><td>Down</td></tr>
+<tr><td><code>k</code></td><td>Up</td></tr>
+<tr><td><code>l</code></td><td>Right</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="word-movement"><a class="header" href="#word-movement">Word Movement</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>w</code></td><td>Forward to start of word</td></tr>
+<tr><td><code>e</code></td><td>Forward to end of word</td></tr>
+<tr><td><code>b</code></td><td>Backward to start of word</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="line-movement"><a class="header" href="#line-movement">Line Movement</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>^</code></td><td>Move to first non-blank char</td></tr>
+<tr><td><code>0</code></td><td>Move to start of line</td></tr>
+<tr><td><code>$</code></td><td>Move to end of line</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="jump"><a class="header" href="#jump">Jump</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>gg</code></td><td>Go to top of file</td></tr>
+<tr><td><code>G</code></td><td>Go to bottom of file</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="editing-actions"><a class="header" href="#editing-actions">Editing Actions</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>x</code></td><td>Delete character under cursor</td></tr>
+<tr><td><code>D</code></td><td>Delete from cursor to end of line</td></tr>
+<tr><td><code>C</code></td><td>Delete from cursor to end, enter Insert mode</td></tr>
+<tr><td><code>p</code></td><td>Paste after cursor</td></tr>
+<tr><td><code>u</code></td><td>Undo</td></tr>
+<tr><td><code>Ctrl+R</code></td><td>Redo</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="operators"><a class="header" href="#operators-1">Operators</a></h2>
+<p>Operators in normal mode select the current line and wait for a confirmation key:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Keys</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>dd</code></td><td>Delete current line</td></tr>
+<tr><td><code>yy</code></td><td>Yank (copy) current line</td></tr>
+<tr><td><code>cc</code></td><td>Change (delete) current line, enter Insert mode</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="enter-insert-mode"><a class="header" href="#enter-insert-mode">Enter Insert Mode</a></h2>
+<h3 id="from-normal-mode"><a class="header" href="#from-normal-mode">From Normal mode</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>i</code></td><td>Enter Insert mode (cursor stays)</td></tr>
+<tr><td><code>a</code></td><td>Enter Insert mode (cursor advances one character)</td></tr>
+<tr><td><code>A</code></td><td>Enter Insert mode at end of line</td></tr>
+<tr><td><code>I</code></td><td>Enter Insert mode at first non-blank char</td></tr>
+<tr><td><code>o</code></td><td>Open a new line below and enter Insert mode</td></tr>
+<tr><td><code>O</code></td><td>Open a new line above and enter Insert mode</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="from-insert-mode"><a class="header" href="#from-insert-mode">From Insert mode</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>Esc</code></td><td>Return to Normal mode</td></tr>
+<tr><td><code>Ctrl+C</code></td><td>Return to Normal mode</td></tr>
+</tbody>
+</table>
+</div>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="modes-1"><a class="header" href="#modes-1">Modes</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="moving-the-cursor-1"><a class="header" href="#moving-the-cursor-1">Moving the Cursor</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="operators-1"><a class="header" href="#operators-1">Operators</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="entering-insert-mode"><a class="header" href="#entering-insert-mode">Entering Insert Mode</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="cli-usage"><a class="header" href="#cli-usage">CLI Usage</a></h1>
+<p>In addition to the TUI, lazydb provides a command-line interface that can be used for scripting, CI pipelines, or quick one-off queries.</p>
+<!-- TODO: screenshot of CLI output -->
+<h2 id="running-the-tui"><a class="header" href="#running-the-tui">Running the TUI</a></h2>
+<pre><code class="language-bash"># Launch with default settings (no file root)
+lazydb
+
+# Launch with a file root directory (auto-opens the files panel)
+lazydb /path/to/queries/
+</code></pre>
+<h2 id="list-connections"><a class="header" href="#list-connections">List Connections</a></h2>
+<pre><code class="language-bash">lazydb conns list
+</code></pre>
+<p>Lists all configured connections and their types.</p>
+<h2 id="test-a-connection"><a class="header" href="#test-a-connection">Test a Connection</a></h2>
+<pre><code class="language-bash">lazydb conns test &lt;name&gt;
+</code></pre>
+<p>Tests that a connection profile is valid by attempting to connect. Outputs <code>OK</code> with the elapsed time on success, or <code>FAILED</code> with the error message on failure.</p>
+<h2 id="execute-a-query"><a class="header" href="#execute-a-query">Execute a Query</a></h2>
+<pre><code class="language-bash"># Execute an inline query
+lazydb query --conn &lt;connection-name&gt; --query "SELECT * FROM users LIMIT 10"
+
+# Execute a query from a SQL file
+lazydb query --conn &lt;connection-name&gt; --file /path/to/query.sql
+
+# Limit the number of result rows (default: 1000)
+lazydb query --conn mydb --query "SELECT 1" --limit 100
+
+# Output in CSV format (default: Table)
+lazydb query --conn mydb --query "SELECT 1" --format csv
+</code></pre>
+<h3 id="lazydb-query-options"><a class="header" href="#lazydb-query-options"><code>lazydb query</code> options</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Option</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>--conn &lt;name&gt;</code></td><td>Name of the connection from <code>profiles.toml</code> (required)</td></tr>
+<tr><td><code>--query &lt;sql&gt;</code></td><td>SQL query to execute (provide <code>--query</code> or <code>--file</code>, not both)</td></tr>
+<tr><td><code>--file &lt;path&gt;</code></td><td>Path to a SQL file to execute (provide <code>--query</code> or <code>--file</code>, not both)</td></tr>
+<tr><td><code>--limit &lt;n&gt;</code></td><td>Maximum number of rows to return (0 for unlimited, default: 1000)</td></tr>
+<tr><td><code>--format &lt;table|csv&gt;</code></td><td>Output format (default: <code>table</code>)</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="output-formatting"><a class="header" href="#output-formatting">Output formatting</a></h3>
+<p>The default <code>table</code> format renders a unicode-bordered table to stdout:</p>
+<pre><code>┌────┬──────────┐
+│ id │ name     │
+├────┼──────────┤
+│ 1  │ Alice    │
+│ 2  │ Bob      │
+└────┴──────────┘
+</code></pre>
+<p>Execution statistics (row count and duration) are written to stderr.</p>
+<p>The <code>csv</code> format outputs raw CSV to stdout (including a header row):</p>
+<pre><code>id,name
+1,Alice
+2,Bob
+</code></pre>
+<h2 id="examples"><a class="header" href="#examples">Examples</a></h2>
+<h3 id="check-a-connection"><a class="header" href="#check-a-connection">Check a connection</a></h3>
+<pre><code class="language-bash">lazydb conns test mydb
+# Output: Testing connection 'mydb' (duckdb)...
+#          OK (2ms)
+</code></pre>
+<h3 id="query-and-pipe-to-a-file"><a class="header" href="#query-and-pipe-to-a-file">Query and pipe to a file</a></h3>
+<pre><code class="language-bash">lazydb query --conn prod --query "SELECT * FROM orders" --limit 0 --format csv &gt; /tmp/orders.csv
+</code></pre>
+<h3 id="format-a-query-file"><a class="header" href="#format-a-query-file">Format a query file</a></h3>
+<p>Open a file in the TUI (via the File Browser), then press <code>Ctrl+F</code> to format it.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="faq--troubleshooting"><a class="header" href="#faq--troubleshooting">FAQ &amp; Troubleshooting</a></h1>
+<h2 id="where-are-the-configuration-files"><a class="header" href="#where-are-the-configuration-files">Where are the configuration files?</a></h2>
+<p>Both files live in <code>~/.config/lazydb/</code>:</p>
+<ul>
+<li><code>config.toml</code> — application settings (sidebar width, keybindings, debug)</li>
+<li><code>profiles.toml</code> — database connection profiles</li>
+<li><code>recents.json</code> — recent query history (auto-managed by lazydb)</li>
+</ul>
+<p>If a file does not exist, lazydb uses defaults. You need to create <code>profiles.toml</code> at a minimum.</p>
+<h2 id="how-do-i-enable-debug-logging"><a class="header" href="#how-do-i-enable-debug-logging">How do I enable debug logging?</a></h2>
+<p>Set <code>debug = true</code> in <code>~/.config/lazydb/config.toml</code>:</p>
+<pre><code class="language-toml">debug = true
+</code></pre>
+<p>Logs are written to <code>~/.config/lazydb/debug.log</code>.</p>
+<h2 id="no-connections-configured--how-do-i-fix-it"><a class="header" href="#no-connections-configured--how-do-i-fix-it">“No connections configured” — how do I fix it?</a></h2>
+<p>Create <code>~/.config/lazydb/profiles.toml</code> with at least one connection. See <a href="#connection-profiles-1">Configuration</a> for the full format. A minimal example:</p>
+<pre><code class="language-toml">[connections.mydb]
+type = "duckdb"
+path = "/tmp/example.duckdb"
+</code></pre>
+<h2 id="connection-fails--what-to-check"><a class="header" href="#connection-fails--what-to-check">Connection fails — what to check?</a></h2>
+<ol>
+<li><strong>Profile name</strong>: The name after <code>--conn</code> or in the sidebar must exactly match the key in <code>profiles.toml</code>.</li>
+<li><strong>Network</strong>: For remote databases (Postgres, ClickHouse, Snowflake, Databricks), check that the host/port is reachable.</li>
+<li><strong>Credentials</strong>: Verify username, password, and database name. Passwords can be omitted from the config for a prompt-less setup by using environment variables or a secrets manager.</li>
+<li><strong>Test via CLI</strong>: Run <code>lazydb conns test &lt;name&gt;</code> to get a clear error message:
+<pre><code class="language-bash">lazydb conns test my_pg
+# Output: Testing connection 'my_pg' (postgres)...
+#          FAILED: connection refused: tcp connect: Connection refused
+</code></pre>
+</li>
+</ol>
+<h2 id="i-cant-type-in-the-query-editor"><a class="header" href="#i-cant-type-in-the-query-editor">I can’t type in the query editor</a></h2>
+<p>You’re likely in Normal mode. Press <code>i</code> to enter Insert mode. Check the status bar at the bottom of the screen — it shows the current mode (<code>NORMAL</code>, <code>INSERT</code>, etc.).</p>
+<h2 id="my-query-returns-no-results"><a class="header" href="#my-query-returns-no-results">My query returns no results</a></h2>
+<p>This could mean one of several things:</p>
+<ul>
+<li>The table is empty</li>
+<li>A <code>WHERE</code> clause filtered everything out</li>
+<li>The schema path is wrong (e.g., Postgres defaults to <code>public</code> schema but your table is in a custom one — see the <code>schema</code> field in the Postgres connection config)</li>
+</ul>
+<h2 id="can-i-use-multiple-snowflake-auth-methods"><a class="header" href="#can-i-use-multiple-snowflake-auth-methods">Can I use multiple Snowflake auth methods?</a></h2>
+<p>Yes — define each auth method as a separate connection:</p>
+<pre><code class="language-toml">[connections.sf]
+type = "snowflake"
+account = "xy12345"
+auth = "password"
+user = "user@example.com"
+password = "s3cret"
+database = "PROD"
+
+[connections.sf_oauth]
+type = "snowflake"
+account = "xy12345"
+auth = "oauth"
+oauth_token = "your_token"
+database = "PROD"
+
+[connections.sf_browser]
+type = "snowflake"
+account = "xy12345"
+auth = "browser"
+user = "user@example.com"
+database = "PROD"
+</code></pre>
+<h2 id="how-do-i-use-docker-compose-to-start-a-dev-environment"><a class="header" href="#how-do-i-use-docker-compose-to-start-a-dev-environment">How do I use docker-compose to start a dev environment?</a></h2>
+<p>A <code>docker-compose.yaml</code> is included in the repository. It starts a Postgres and a ClickHouse database pre-configured for lazydb:</p>
+<pre><code class="language-bash"># Start dev databases
+docker compose up
+
+# Now create ~/.config/lazydb/profiles.toml with:
+[connections.pg]
+type = "postgres"
+host = "localhost"
+port = 5432
+user = "lazydb"
+password = "lazydb"
+database = "lazydb"
+
+[connections.ch]
+type = "clickhouse"
+url = "http://localhost:8123"
+user = "lazydb"
+password = "lazydb"
+database = "lazydb"
+</code></pre>
+<p>Stop with <code>docker compose down</code>. Data is persisted in Docker named volumes (<code>pgdata</code> and <code>chdata</code>).</p>
+<h2 id="where-is-the-schema-data-for-clickhouse"><a class="header" href="#where-is-the-schema-data-for-clickhouse">Where is the schema data for ClickHouse?</a></h2>
+<p>The docker-compose ClickHouse image includes sample tables (<code>products</code>, <code>orders</code>, <code>order_summary</code>) automatically via <code>docker/clickhouse/init.sql</code>.</p>
+<p>The ClickHouse connection type uses a flat schema tree (no schema level — just tables and views directly under the connection root).</p>
+<h2 id="can-i-customize-the-keybindings"><a class="header" href="#can-i-customize-the-keybindings">Can I customize the keybindings?</a></h2>
+<p>Yes. See <a href="#connection-profiles-1">configuration.md</a> under “Application Config” for the full keybinding format. Any keybinding can be overridden by adding the corresponding path to your <code>config.toml</code>.</p>
+<h2 id="how-do-i-customize-the-sidebar-width"><a class="header" href="#how-do-i-customize-the-sidebar-width">How do I customize the sidebar width?</a></h2>
+<p>Add to <code>~/.config/lazydb/config.toml</code>:</p>
+<pre><code class="language-toml">sidebar_width = 30
+</code></pre>
+<p>Value is a percentage (10-50). Default is 25.</p>
+<h2 id="the-status-bar-shows-leader-leader-key-help--what-does-that-mean"><a class="header" href="#the-status-bar-shows-leader-leader-key-help--what-does-that-mean">The status bar shows “leader leader key help” — what does that mean?</a></h2>
+<p>The status bar always shows <code>leader key  leader key  ? help</code> as a reminder:</p>
+<ul>
+<li>Press <code>leader key</code> (default: Space) for context-sensitive actions</li>
+<li>Press <code>?</code> for the help overlay</li>
+</ul>
+<p>This is visible regardless of which panel is focused.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+        <!-- Livereload script (if served using the cli tool) -->
+        <script>
+            const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsAddress = wsProtocol + "//" + location.host + "/" + "__livereload";
+            const socket = new WebSocket(wsAddress);
+            socket.onmessage = function (event) {
+                if (event.data === "reload") {
+                    socket.close();
+                    location.reload();
+                }
+            };
+
+            window.onbeforeunload = function() {
+                socket.close();
+            }
+        </script>
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr-ef4e11c1.min.js"></script>
+        <script src="mark-09e88c2c.min.js"></script>
+        <script src="searcher-c2a407aa.js"></script>
+
+        <script src="clipboard-1626706a.min.js"></script>
+        <script src="highlight-abc7f01d.js"></script>
+        <script src="book-a0b12cfe.js"></script>
+
+        <!-- Custom JS scripts -->
+
+        <script>
+        window.addEventListener('load', function() {
+            window.setTimeout(window.print, 100);
+        });
+        </script>
+
+
+    </div>
+    </body>
+</html>

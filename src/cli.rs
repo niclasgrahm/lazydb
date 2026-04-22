@@ -13,6 +13,9 @@ const DEFAULT_LIMIT: usize = 1000;
 #[derive(Parser)]
 #[command(name = "lazydb", about = "Terminal UI database client")]
 pub struct Cli {
+    /// Root directory for the files pane
+    pub path: Option<PathBuf>,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }

@@ -13,7 +13,7 @@ use crate::db::snowflake_backend::Snowflake;
 use crate::db::Database;
 use crate::keybindings::KeybindingsConfig;
 
-fn config_dir() -> PathBuf {
+pub(crate) fn config_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("~"))
         .join(".config")
@@ -30,10 +30,16 @@ pub struct AppConfig {
     pub keybindings: KeybindingsConfig,
     #[serde(default)]
     pub debug: bool,
+    #[serde(default = "default_max_recents")]
+    pub max_recents: usize,
 }
 
 fn default_sidebar_width() -> u16 {
     25
+}
+
+fn default_max_recents() -> usize {
+    10
 }
 
 impl Default for AppConfig {
@@ -42,6 +48,7 @@ impl Default for AppConfig {
             sidebar_width: default_sidebar_width(),
             keybindings: KeybindingsConfig::default(),
             debug: false,
+            max_recents: default_max_recents(),
         }
     }
 }
@@ -545,6 +552,18 @@ mod tests {
             }
             _ => panic!("expected Databricks"),
         }
+    }
+
+    #[test]
+    fn config_default_max_recents() {
+        let config: AppConfig = toml::from_str("").unwrap();
+        assert_eq!(config.max_recents, 10);
+    }
+
+    #[test]
+    fn config_custom_max_recents() {
+        let config: AppConfig = toml::from_str("max_recents = 25").unwrap();
+        assert_eq!(config.max_recents, 25);
     }
 
     #[test]

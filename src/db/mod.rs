@@ -4,10 +4,11 @@ pub mod duckdb_backend;
 pub mod postgres_backend;
 pub mod snowflake_backend;
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// A single value returned from a query.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Value {
     Null,
     Bool(bool),
@@ -29,7 +30,7 @@ impl fmt::Display for Value {
 }
 
 /// Tabular result from a query.
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QueryResult {
     pub columns: Vec<String>,
     pub rows: Vec<Vec<Value>>,
@@ -127,5 +128,35 @@ mod tests {
     #[test]
     fn value_display_float() {
         assert_eq!(Value::Float(3.14).to_string(), "3.14");
+    }
+
+    #[test]
+    fn value_serialize_roundtrip() {
+        let values = vec![
+            Value::Null,
+            Value::Bool(true),
+            Value::Int(42),
+            Value::Float(3.14),
+            Value::Text("hello".into()),
+        ];
+        for val in &values {
+            let json = serde_json::to_string(val).unwrap();
+            let back: Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(*val, back);
+        }
+    }
+
+    #[test]
+    fn query_result_serialize_roundtrip() {
+        let qr = QueryResult {
+            columns: vec!["id".into(), "name".into()],
+            rows: vec![
+                vec![Value::Int(1), Value::Text("alice".into())],
+                vec![Value::Int(2), Value::Null],
+            ],
+        };
+        let json = serde_json::to_string(&qr).unwrap();
+        let back: QueryResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(qr, back);
     }
 }

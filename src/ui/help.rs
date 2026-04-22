@@ -45,7 +45,7 @@ pub fn draw(app: &App, frame: &mut Frame) {
             lines.push(key_line(&s.collapse, "Collapse"));
             lines.push(key_line(&s.activate, "Connect / toggle"));
             lines.push(key_line(&s.preview, "Preview table/view"));
-            lines.push(key_line(&s.quit, "Quit"));
+            lines.push(leader_line(leader, 'q', "Quit"));
         }
         Focus::QueryEditor => {
             lines.push(section_header("Editor"));
@@ -79,7 +79,7 @@ pub fn draw(app: &App, frame: &mut Frame) {
             lines.push(key_line(&r.next_page, "Next page"));
             lines.push(key_line(&r.prev_page, "Previous page"));
             lines.push(key_line(&r.close, "Close results"));
-            lines.push(key_line(&r.quit, "Quit"));
+            lines.push(leader_line(leader, 'q', "Quit"));
         }
         Focus::Files => {
             lines.push(section_header("Files"));

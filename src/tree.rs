@@ -1,4 +1,5 @@
 /// A node in the connection/object tree sidebar.
+#[derive(Clone)]
 pub struct TreeNode {
     pub label: String,
     pub expanded: bool,
