@@ -206,7 +206,7 @@ impl Connection {
                 DuckDb::connect(&cfg.path).map(|db| Box::new(db) as Box<dyn Database>)
             }
             Connection::Postgres(cfg) => {
-                Postgres::connect(&cfg.connection_string(), cfg.schema_name())
+                Postgres::connect(&cfg.connection_string())
                     .map(|db| Box::new(db) as Box<dyn Database>)
             }
             Connection::ClickHouse(cfg) => {

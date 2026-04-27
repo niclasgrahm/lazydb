@@ -272,8 +272,9 @@ impl<'a> App<'a> {
         let sql = if is_select {
             let offset = self.results_page * RESULTS_PAGE_SIZE;
             debug!(page = self.results_page, offset, "running paged query");
+            let query_stripped = strip_trailing_semicolons(query);
             format!(
-                "SELECT * FROM ({query}) AS _lazydb_q LIMIT {limit} OFFSET {offset}",
+                "SELECT * FROM ({query_stripped}) AS _lazydb_q LIMIT {limit} OFFSET {offset}",
                 limit = RESULTS_PAGE_SIZE + 1,
             )
         } else {
@@ -443,17 +444,17 @@ impl<'a> App<'a> {
             return SidebarNodeKind::Connection;
         }
 
-        // Walk backwards to find the immediate parent
-        let full_flat = TreeNode::flatten_all(&self.sidebar_items);
-        if let Some(n) = full_flat.get(node.flat_index) {
-            let target_depth = n.depth;
-            for ancestor in full_flat[..node.flat_index].iter().rev() {
-                if ancestor.depth == target_depth - 1 {
-                    if ancestor.label == "Tables" || ancestor.label == "Views" {
-                        return SidebarNodeKind::TableOrView;
-                    }
-                    break;
+        // Walk backwards in the filtered list to find the immediate parent.
+        // Using the filtered list (not unfiltered flat_index) is correct because
+        // filtering force-expands collapsed ancestors, so flat_index values may
+        // not correspond to positions in the unfiltered tree.
+        let target_depth = node.depth;
+        for ancestor in flat[..selected].iter().rev() {
+            if ancestor.depth == target_depth - 1 {
+                if ancestor.label == "Tables" || ancestor.label == "Views" {
+                    return SidebarNodeKind::TableOrView;
                 }
+                break;
             }
         }
 
@@ -520,10 +521,7 @@ impl<'a> App<'a> {
             'h' => self.show_help = true,
             's' => {
                 if let Some(selected) = self.sidebar_state.selected() {
-                    let flat = self.filtered_flat_nodes();
-                    if let Some(node) = flat.get(selected) {
-                        self.preview_table(node.flat_index);
-                    }
+                    self.preview_table(selected);
                 }
             }
             'o' => {
@@ -670,9 +668,7 @@ impl<'a> App<'a> {
             }
         } else if kb.preview.matches(key) {
             if let Some(selected) = self.sidebar_state.selected() {
-                if let Some(node) = flat.get(selected) {
-                    self.preview_table(node.flat_index);
-                }
+                self.preview_table(selected);
             }
         }
     }
@@ -944,14 +940,16 @@ impl<'a> App<'a> {
         profile.connect()
     }
 
-    fn preview_table(&mut self, flat_index: usize) {
-        let flat = TreeNode::flatten_all(&self.sidebar_items);
-        let Some(node) = flat.get(flat_index) else { return };
+    fn preview_table(&mut self, flat_pos: usize) {
+        let flat = self.filtered_flat_nodes();
+        let Some(node) = flat.get(flat_pos) else { return };
 
-        // Collect ancestors by walking backwards through nodes with decreasing depth
+        // Collect ancestors by walking backwards in the filtered list.
+        // The filtered list always includes ancestors of matching nodes, so this
+        // works correctly even when filtering force-expands collapsed folders.
         let mut ancestors: Vec<&str> = Vec::new();
         let mut target_depth = node.depth;
-        for ancestor in flat[..flat_index].iter().rev() {
+        for ancestor in flat[..flat_pos].iter().rev() {
             if ancestor.depth < target_depth {
                 ancestors.push(&ancestor.label);
                 target_depth = ancestor.depth;
@@ -1164,6 +1162,17 @@ impl<'a> App<'a> {
             self.leader_active = true;
         }
     }
+}
+
+/// Strips trailing semicolons (and surrounding whitespace) from a SQL query.
+/// Required before embedding a query as a subquery, since semicolons are
+/// statement terminators and are invalid inside subquery expressions.
+fn strip_trailing_semicolons(sql: &str) -> &str {
+    let mut s = sql.trim_end();
+    while s.ends_with(';') {
+        s = s[..s.len() - 1].trim_end();
+    }
+    s
 }
 
 /// Returns true if the query is a SELECT-like statement that returns rows
@@ -1677,6 +1686,43 @@ mod tests {
     }
 
     #[test]
+    fn leader_s_with_filter_shows_table_when_parent_collapsed() {
+        // Regression: when a filter force-expands a collapsed Tables folder to show
+        // a matching table, leader+s must still insert the preview query.
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        app.focus = Focus::Sidebar;
+        let label = app.sidebar_items[0].label.clone();
+        app.populate_schema(&label, vec![
+            SchemaNode::group("Tables", vec![
+                SchemaNode::leaf("users"),
+            ]),
+        ]);
+        // Connection is expanded but Tables is NOT expanded (collapsed)
+        app.sidebar_items[0].expanded = true;
+        // app.sidebar_items[0].children[0].expanded stays false
+
+        // Apply a filter that matches "users" — filtered view force-expands Tables
+        app.sidebar_filter = "users".into();
+        app.sidebar_filtering = false;
+
+        // The filtered list should show: Connection(0), Tables(1), users(2)
+        let flat = app.filtered_flat_nodes();
+        let users_pos = flat.iter().position(|n| n.label == "users").expect("users in filtered list");
+        app.sidebar_state.select(Some(users_pos));
+
+        // leader_actions must include 's'
+        let actions = app.leader_actions();
+        assert!(actions.iter().any(|a| a.key == 's'), "preview action should be available with filter active");
+
+        // leader+s must insert the preview query into the editor
+        app.leader_active = true;
+        app.handle_leader_action(&key(KeyCode::Char('s')));
+        let editor_text: String = app.editor.lines().join("\n");
+        assert!(editor_text.contains("users"), "expected preview query with 'users', got: {editor_text:?}");
+        assert_eq!(app.focus, Focus::QueryEditor);
+    }
+
+    #[test]
     fn leader_actions_sidebar_on_folder() {
         let mut app = App::new(AppConfig::default(), test_profiles(), None);
         app.focus = Focus::Sidebar;
@@ -1828,6 +1874,39 @@ mod tests {
     fn query_is_select_values_and_table() {
         assert!(query_is_select("VALUES (1, 2), (3, 4)"));
         assert!(query_is_select("TABLE foo"));
+    }
+
+    // --- strip_trailing_semicolons ---
+
+    #[test]
+    fn strip_semicolon_removes_single() {
+        assert_eq!(strip_trailing_semicolons("SELECT 1;"), "SELECT 1");
+    }
+
+    #[test]
+    fn strip_semicolon_removes_multiple() {
+        assert_eq!(strip_trailing_semicolons("SELECT 1;;;"), "SELECT 1");
+    }
+
+    #[test]
+    fn strip_semicolon_handles_whitespace() {
+        assert_eq!(strip_trailing_semicolons("SELECT 1 ;  "), "SELECT 1");
+        assert_eq!(strip_trailing_semicolons("SELECT 1 ; ; "), "SELECT 1");
+    }
+
+    #[test]
+    fn strip_semicolon_no_op_without_semicolon() {
+        assert_eq!(strip_trailing_semicolons("SELECT 1"), "SELECT 1");
+        assert_eq!(strip_trailing_semicolons("  SELECT 1  "), "  SELECT 1");
+    }
+
+    #[test]
+    fn strip_semicolon_preserves_internal_semicolons() {
+        // Semicolons inside the query (e.g. strings) are not touched
+        assert_eq!(
+            strip_trailing_semicolons("SELECT ';' AS s;"),
+            "SELECT ';' AS s"
+        );
     }
 
     // --- Pane visibility toggles ---
