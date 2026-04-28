@@ -902,7 +902,7 @@ impl<'a> App<'a> {
                     if node.has_children {
                         self.files_expand_or_toggle(node.flat_index);
                     } else {
-                        self.files_open_file(selected);
+                        self.files_open_file(node.flat_index);
                     }
                 }
             }
