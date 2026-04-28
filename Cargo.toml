@@ -16,6 +16,7 @@ postgres = "0.19"
 ureq = "3"
 serde_json = "1"
 sqlformat = "0.5"
+prqlc = { version = "0.13.12", default-features = false }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive"] }

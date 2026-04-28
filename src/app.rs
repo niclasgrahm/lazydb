@@ -30,6 +30,49 @@ pub enum Focus {
     Recent,
 }
 
+#[derive(Debug, PartialEq, Clone, Copy, Default)]
+pub enum QueryLanguage {
+    #[default]
+    Sql,
+    Prql,
+}
+
+impl QueryLanguage {
+    pub fn display(&self) -> &'static str {
+        match self {
+            QueryLanguage::Sql => "SQL",
+            QueryLanguage::Prql => "PRQL",
+        }
+    }
+
+    pub fn cycle(&self) -> Self {
+        match self {
+            QueryLanguage::Sql => QueryLanguage::Prql,
+            QueryLanguage::Prql => QueryLanguage::Sql,
+        }
+    }
+
+    /// Whether the SQL preview pane should be visible by default for this language.
+    pub fn preview_by_default(&self) -> bool {
+        !matches!(self, QueryLanguage::Sql)
+    }
+
+    /// Transpile the given source to SQL. Returns `Err` with a human-readable
+    /// message if the source cannot be compiled (e.g. invalid PRQL).
+    pub fn transpile(&self, source: &str) -> Result<String, String> {
+        match self {
+            QueryLanguage::Sql => Ok(source.to_string()),
+            QueryLanguage::Prql => {
+                use prqlc::{Options, Target, compile};
+                let opts = Options::default()
+                    .with_target(Target::Sql(None))
+                    .with_signature_comment(false);
+                compile(source, &opts).map_err(|e| e.to_string())
+            }
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum MessageLevel {
     Info,
@@ -91,6 +134,8 @@ pub struct App<'a> {
     bg_receiver: Option<mpsc::Receiver<BgResult>>,
     pub sidebar_filter: String,
     pub sidebar_filtering: bool,
+    pub file_filter: String,
+    pub file_filtering: bool,
     pub leader_active: bool,
     pub show_sidebar: bool,
     pub show_files: bool,
@@ -103,6 +148,8 @@ pub struct App<'a> {
     pub file_tree_state: ListState,
     pub files_root: Option<PathBuf>,
     pub file_paths: Vec<PathBuf>,
+    pub query_language: QueryLanguage,
+    pub show_sql_preview: bool,
 }
 
 impl<'a> App<'a> {
@@ -161,6 +208,8 @@ impl<'a> App<'a> {
             bg_receiver: None,
             sidebar_filter: String::new(),
             sidebar_filtering: false,
+            file_filter: String::new(),
+            file_filtering: false,
             leader_active: false,
             show_sidebar: true,
             show_files: has_files,
@@ -172,6 +221,8 @@ impl<'a> App<'a> {
             file_tree_state,
             files_root,
             file_paths,
+            query_language: QueryLanguage::default(),
+            show_sql_preview: QueryLanguage::default().preview_by_default(),
         }
     }
 
@@ -228,31 +279,58 @@ impl<'a> App<'a> {
         }
     }
 
+    pub fn cycle_query_language(&mut self) {
+        self.query_language = self.query_language.cycle();
+        self.show_sql_preview = self.query_language.preview_by_default();
+    }
+
+    pub fn sql_preview(&self) -> String {
+        let source = self.editor.lines().join("\n");
+        self.query_language.transpile(&source)
+            .unwrap_or_else(|e| format!("-- PRQL error\n{e}"))
+    }
+
     pub fn format_query(&mut self) {
         let query: String = self.editor.lines().join("\n");
         if query.trim().is_empty() {
             return;
         }
-        let formatted = sqlformat::format(
-            &query,
-            &sqlformat::QueryParams::None,
-            &sqlformat::FormatOptions {
-                indent: sqlformat::Indent::Spaces(2),
-                uppercase: Some(true),
-                lines_between_queries: 1,
-                ..Default::default()
-            },
-        );
+        let formatted = match self.query_language {
+            QueryLanguage::Sql => sqlformat::format(
+                &query,
+                &sqlformat::QueryParams::None,
+                &sqlformat::FormatOptions {
+                    indent: sqlformat::Indent::Spaces(2),
+                    uppercase: Some(true),
+                    lines_between_queries: 1,
+                    ..Default::default()
+                },
+            ),
+            QueryLanguage::Prql => {
+                match prqlc::prql_to_pl(&query).and_then(|pl| prqlc::pl_to_prql(&pl)) {
+                    Ok(s) => s,
+                    Err(_) => return, // leave editor untouched on parse error
+                }
+            }
+        };
         self.editor.select_all();
         self.editor.cut();
         self.editor.insert_str(&formatted);
     }
 
     pub fn execute_query(&mut self) {
-        let query: String = self.editor.lines().join("\n");
-        if query.trim().is_empty() {
+        let source: String = self.editor.lines().join("\n");
+        if source.trim().is_empty() {
             return;
         }
+        let query = match self.query_language.transpile(source.trim()) {
+            Ok(sql) => sql,
+            Err(e) => {
+                error!(error = %e, "transpilation failed");
+                self.show_error(format!("Transpile error: {e}"));
+                return;
+            }
+        };
         info!(query = query.trim(), "executing query");
         self.results_query = Some(query.trim().to_string());
         self.results_page = 0;
@@ -423,6 +501,7 @@ impl<'a> App<'a> {
                 Focus::Sidebar if self.sidebar_filtering => self.handle_sidebar_filter_key(key),
                 Focus::Sidebar => self.handle_sidebar_key(key),
                 Focus::Results => self.handle_results_key(key),
+                Focus::Files if self.file_filtering => self.handle_files_filter_key(key),
                 Focus::Files => self.handle_files_key(key),
                 Focus::Recent => self.handle_recent_key(key),
             }
@@ -468,6 +547,8 @@ impl<'a> App<'a> {
             Focus::QueryEditor => {
                 actions.push(LeaderEntry { key: 'e', label: "Execute query" });
                 actions.push(LeaderEntry { key: 'f', label: "Format query" });
+                actions.push(LeaderEntry { key: 'l', label: "Switch language" });
+                actions.push(LeaderEntry { key: 'p', label: "Toggle SQL preview" });
             }
             Focus::Sidebar => {
                 let kind = self.sidebar_node_kind();
@@ -518,6 +599,8 @@ impl<'a> App<'a> {
         match ch {
             'e' => self.execute_query(),
             'f' => self.format_query(),
+            'l' => self.cycle_query_language(),
+            'p' => self.show_sql_preview = !self.show_sql_preview,
             'h' => self.show_help = true,
             's' => {
                 if let Some(selected) = self.sidebar_state.selected() {
@@ -614,6 +697,15 @@ impl<'a> App<'a> {
             TreeNode::flatten_all(&self.sidebar_items)
         } else {
             TreeNode::flatten_all_filtered(&self.sidebar_items, &self.sidebar_filter)
+        }
+    }
+
+    /// Returns the flat nodes for the file tree, respecting the current filter.
+    pub fn filtered_file_nodes(&self) -> Vec<crate::tree::FlatNode> {
+        if self.file_filter.is_empty() {
+            TreeNode::flatten_all(&self.file_tree)
+        } else {
+            TreeNode::flatten_all_filtered(&self.file_tree, &self.file_filter)
         }
     }
 
@@ -740,8 +832,57 @@ impl<'a> App<'a> {
         }
     }
 
+    fn handle_files_filter_key(&mut self, key: &crossterm::event::KeyEvent) {
+        use crossterm::event::KeyCode;
+        match key.code {
+            KeyCode::Esc => {
+                self.file_filtering = false;
+                self.file_filter.clear();
+                if !self.file_tree.is_empty() {
+                    self.file_tree_state.select(Some(0));
+                }
+            }
+            KeyCode::Enter => {
+                self.file_filtering = false;
+            }
+            KeyCode::Backspace => {
+                self.file_filter.pop();
+                if self.file_filter.is_empty() {
+                    self.file_filtering = false;
+                    if !self.file_tree.is_empty() {
+                        self.file_tree_state.select(Some(0));
+                    }
+                } else {
+                    let flat = self.filtered_file_nodes();
+                    if !flat.is_empty() {
+                        self.file_tree_state.select(Some(0));
+                    } else {
+                        self.file_tree_state.select(None);
+                    }
+                }
+            }
+            KeyCode::Char(c) => {
+                self.file_filter.push(c);
+                let flat = self.filtered_file_nodes();
+                if !flat.is_empty() {
+                    self.file_tree_state.select(Some(0));
+                } else {
+                    self.file_tree_state.select(None);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn handle_files_key(&mut self, key: &crossterm::event::KeyEvent) {
-        let flat = TreeNode::flatten_all(&self.file_tree);
+        use crossterm::event::KeyCode;
+        if key.code == KeyCode::Char('/') {
+            self.file_filtering = true;
+            self.file_filter.clear();
+            return;
+        }
+
+        let flat = self.filtered_file_nodes();
         let item_count = flat.len();
         let kb = &self.keys.sidebar;
 
@@ -847,6 +988,9 @@ impl<'a> App<'a> {
                 self.editor.set_cursor_line_style(Style::default());
                 self.focus = Focus::QueryEditor;
                 self.vim = Vim::new(vim::Mode::Normal);
+                // Recent queries are always SQL (stored post-transpilation)
+                self.query_language = QueryLanguage::Sql;
+                self.show_sql_preview = false;
             }
         }
     }
@@ -1421,6 +1565,92 @@ mod tests {
         assert_eq!(app.sidebar_filter, "pg"); // filter kept
     }
 
+    // --- Files filter key handling ---
+
+    fn app_with_file_tree() -> App<'static> {
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        app.file_tree = vec![
+            TreeNode::folder("src", vec![
+                TreeNode::leaf("main.sql"),
+                TreeNode::leaf("queries.sql"),
+            ]),
+            TreeNode::leaf("README.md"),
+        ];
+        app.file_tree_state.select(Some(0));
+        app
+    }
+
+    #[test]
+    fn files_slash_starts_filter() {
+        let mut app = app_with_file_tree();
+        app.focus = Focus::Files;
+        assert!(!app.file_filtering);
+        app.handle_files_key(&key(KeyCode::Char('/')));
+        assert!(app.file_filtering);
+        assert!(app.file_filter.is_empty());
+    }
+
+    #[test]
+    fn files_filter_char_appends() {
+        let mut app = app_with_file_tree();
+        app.file_filtering = true;
+        app.handle_files_filter_key(&key(KeyCode::Char('s')));
+        assert_eq!(app.file_filter, "s");
+        app.handle_files_filter_key(&key(KeyCode::Char('q')));
+        assert_eq!(app.file_filter, "sq");
+    }
+
+    #[test]
+    fn files_filter_backspace_pops() {
+        let mut app = app_with_file_tree();
+        app.file_filtering = true;
+        app.file_filter = "sq".into();
+        app.handle_files_filter_key(&key(KeyCode::Backspace));
+        assert_eq!(app.file_filter, "s");
+    }
+
+    #[test]
+    fn files_filter_backspace_on_empty_exits() {
+        let mut app = app_with_file_tree();
+        app.file_filtering = true;
+        app.file_filter = "x".into();
+        app.handle_files_filter_key(&key(KeyCode::Backspace));
+        assert!(!app.file_filtering);
+        assert!(app.file_filter.is_empty());
+    }
+
+    #[test]
+    fn files_filter_esc_clears_and_exits() {
+        let mut app = app_with_file_tree();
+        app.file_filtering = true;
+        app.file_filter = "sql".into();
+        app.handle_files_filter_key(&key(KeyCode::Esc));
+        assert!(!app.file_filtering);
+        assert!(app.file_filter.is_empty());
+    }
+
+    #[test]
+    fn files_filter_enter_keeps_filter_exits_mode() {
+        let mut app = app_with_file_tree();
+        app.file_filtering = true;
+        app.file_filter = "sql".into();
+        app.handle_files_filter_key(&key(KeyCode::Enter));
+        assert!(!app.file_filtering);
+        assert_eq!(app.file_filter, "sql");
+    }
+
+    #[test]
+    fn files_filtered_nodes_match_substring() {
+        let mut app = app_with_file_tree();
+        app.file_filter = "sql".into();
+        let nodes = app.filtered_file_nodes();
+        // Matching leaves appear; ancestors of matches also appear (same as sidebar behaviour)
+        assert!(nodes.iter().any(|n| n.label == "main.sql"));
+        assert!(nodes.iter().any(|n| n.label == "queries.sql"));
+        assert!(nodes.iter().any(|n| n.label == "src")); // ancestor of matching children
+        assert!(!nodes.iter().any(|n| n.label == "README.md")); // no match, no ancestor path
+    }
+
     // --- Results key handling ---
 
     #[test]
@@ -1646,9 +1876,106 @@ mod tests {
         let actions = app.leader_actions();
         assert!(actions.iter().any(|a| a.key == 'e'), "execute");
         assert!(actions.iter().any(|a| a.key == 'f'), "format");
+        assert!(actions.iter().any(|a| a.key == 'l'), "switch language");
         assert!(actions.iter().any(|a| a.key == 'h'), "help");
         assert!(!actions.iter().any(|a| a.key == 's'), "no preview");
         assert!(!actions.iter().any(|a| a.key == 'c'), "no close");
+    }
+
+    #[test]
+    fn query_language_cycles() {
+        assert_eq!(QueryLanguage::Sql.cycle(), QueryLanguage::Prql);
+        assert_eq!(QueryLanguage::Prql.cycle(), QueryLanguage::Sql);
+    }
+
+    #[test]
+    fn query_language_default_is_sql() {
+        let app = App::new(AppConfig::default(), test_profiles(), None);
+        assert_eq!(app.query_language, QueryLanguage::Sql);
+    }
+
+    #[test]
+    fn sql_preview_hidden_by_default() {
+        let app = App::new(AppConfig::default(), test_profiles(), None);
+        assert!(!app.show_sql_preview);
+    }
+
+    #[test]
+    fn switching_to_prql_shows_preview() {
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        app.focus = Focus::QueryEditor;
+        app.handle_leader_action(&key(KeyCode::Char('l')));
+        assert_eq!(app.query_language, QueryLanguage::Prql);
+        assert!(app.show_sql_preview);
+    }
+
+    #[test]
+    fn switching_back_to_sql_hides_preview() {
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        app.focus = Focus::QueryEditor;
+        app.handle_leader_action(&key(KeyCode::Char('l'))); // → PRQL
+        app.handle_leader_action(&key(KeyCode::Char('l'))); // → SQL
+        assert_eq!(app.query_language, QueryLanguage::Sql);
+        assert!(!app.show_sql_preview);
+    }
+
+    #[test]
+    fn toggle_preview_keybind() {
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        app.focus = Focus::QueryEditor;
+        assert!(!app.show_sql_preview);
+        app.handle_leader_action(&key(KeyCode::Char('p')));
+        assert!(app.show_sql_preview);
+        app.handle_leader_action(&key(KeyCode::Char('p')));
+        assert!(!app.show_sql_preview);
+    }
+
+    #[test]
+    fn sql_preview_returns_source_for_sql() {
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        app.editor.insert_str("SELECT 1");
+        assert_eq!(app.sql_preview(), "SELECT 1");
+    }
+
+    #[test]
+    fn sql_preview_transpiles_prql() {
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        app.focus = Focus::QueryEditor;
+        app.handle_leader_action(&key(KeyCode::Char('l'))); // → PRQL
+        app.editor.insert_str("from employees | select {name}");
+        let preview = app.sql_preview();
+        assert!(!preview.contains("-- PRQL error"), "expected valid SQL, got: {preview}");
+        assert!(preview.to_lowercase().contains("select"));
+    }
+
+    #[test]
+    fn sql_preview_shows_error_for_invalid_prql() {
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        app.focus = Focus::QueryEditor;
+        app.handle_leader_action(&key(KeyCode::Char('l'))); // → PRQL
+        app.editor.insert_str("this is not valid prql !!!");
+        let preview = app.sql_preview();
+        assert!(preview.contains("-- PRQL error"), "expected error comment, got: {preview}");
+    }
+
+    #[test]
+    fn leader_action_l_cycles_language() {
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        app.focus = Focus::QueryEditor;
+        assert_eq!(app.query_language, QueryLanguage::Sql);
+        app.handle_leader_action(&key(KeyCode::Char('l')));
+        assert_eq!(app.query_language, QueryLanguage::Prql);
+        app.handle_leader_action(&key(KeyCode::Char('l')));
+        assert_eq!(app.query_language, QueryLanguage::Sql);
+    }
+
+    #[test]
+    fn switch_language_not_available_outside_query_editor() {
+        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        app.focus = Focus::Sidebar;
+        let actions = app.leader_actions();
+        assert!(!actions.iter().any(|a| a.key == 'l'), "no switch language in sidebar");
+        assert!(!actions.iter().any(|a| a.key == 'p'), "no preview toggle in sidebar");
     }
 
     #[test]
@@ -2117,6 +2444,21 @@ mod tests {
         let text: String = app.editor.lines().join("\n");
         assert_eq!(text, "SELECT 1");
         assert_eq!(app.focus, Focus::QueryEditor);
+    }
+
+    #[test]
+    fn recent_enter_resets_language_to_sql() {
+        let mut app = app_with_recents(1);
+        // Switch to PRQL first
+        app.focus = Focus::QueryEditor;
+        app.handle_leader_action(&key(KeyCode::Char('l')));
+        assert_eq!(app.query_language, QueryLanguage::Prql);
+        assert!(app.show_sql_preview);
+        // Load a recent (always SQL) query
+        app.focus = Focus::Recent;
+        app.handle_recent_key(&KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.query_language, QueryLanguage::Sql);
+        assert!(!app.show_sql_preview);
     }
 
     #[test]

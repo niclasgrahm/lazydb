@@ -7,6 +7,7 @@ mod message;
 mod recent;
 mod results;
 mod sidebar;
+mod sql_preview;
 mod status_bar;
 
 use ratatui::{
@@ -80,9 +81,19 @@ pub fn draw(app: &mut App, frame: &mut Frame) {
         }
     }
 
-    // Center: query editor
-    editor::draw(app, frame, panes[col]);
+    // Center: query editor, optionally split with SQL preview below
+    let center_area = panes[col];
     col += 1;
+    if app.show_sql_preview {
+        let center_split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+            .split(center_area);
+        editor::draw(app, frame, center_split[0]);
+        sql_preview::draw(app, frame, center_split[1]);
+    } else {
+        editor::draw(app, frame, center_area);
+    }
 
     // Right column: recent
     if has_right {

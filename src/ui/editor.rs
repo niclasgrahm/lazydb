@@ -24,10 +24,11 @@ pub fn draw(app: &App, frame: &mut Frame, area: Rect) {
         .map(|name| format!("{} - ", name))
         .unwrap_or_default();
 
+    let lang = app.query_language.display();
     let title = if focused {
-        format!(" {}Query [{}] ", db_prefix, app.vim.mode)
+        format!(" {}Query [{}] [{}] ", db_prefix, lang, app.vim.mode)
     } else {
-        format!(" {}Query ", db_prefix)
+        format!(" {}Query [{}] ", db_prefix, lang)
     };
 
     let block = Block::default()
