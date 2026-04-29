@@ -158,6 +158,27 @@ impl Snowflake {
         let start = Instant::now();
         let account_url = format!("https://{account}.snowflakecomputing.com");
 
+        // Try cached token first
+        if let Some(token) = get_cached_token(account, user, role) {
+            debug!("snowflake: found cached SSO token, attempting to reuse");
+            let sf = Self {
+                account_url: account_url.clone(),
+                token,
+                auth_method: AuthMethod::Session,
+                database: database.to_string(),
+                warehouse: warehouse.map(|s| s.to_string()),
+                schema: schema.unwrap_or("PUBLIC").to_string(),
+                role: role.map(|s| s.to_string()),
+            };
+
+            if sf.raw_query("SELECT 1").is_ok() {
+                info!("snowflake: reused cached SSO token successfully");
+                return Ok(sf);
+            } else {
+                debug!("snowflake: cached token invalid or expired, initiating full SSO flow");
+            }
+        }
+
         // Bind a local listener on a random port for the SSO callback
         let listener = TcpListener::bind("127.0.0.1:0")
             .map_err(|e| format!("Failed to bind local server for SSO: {e}"))?;
@@ -281,13 +302,19 @@ impl Snowflake {
             })?;
         debug!(elapsed_ms = req_start.elapsed().as_millis(), status = response.status().as_u16(), "snowflake: SSO login response received");
 
+        let status = response.status();
         let body = response
             .body_mut()
             .read_to_string()
             .map_err(|e| format!("Failed to read login response: {e}"))?;
 
+        if !status.is_success() && body.trim().is_empty() {
+            error!(status = status.as_u16(), "snowflake: SSO login failed with empty response");
+            return Err(format!("Snowflake SSO login failed with HTTP {}", status.as_u16()));
+        }
+
         let json: serde_json::Value =
-            serde_json::from_str(&body).map_err(|e| format!("Login JSON parse error: {e}"))?;
+            serde_json::from_str(&body).map_err(|e| format!("Login JSON parse error: {e}. Body: {body}"))?;
 
         if !json["success"].as_bool().unwrap_or(false) {
             let msg = json["message"]
@@ -315,6 +342,10 @@ impl Snowflake {
         debug!("snowflake: verifying SSO connectivity with SELECT 1");
         sf.raw_query("SELECT 1")?;
         info!(total_elapsed_ms = start.elapsed().as_millis(), "snowflake: browser SSO connection fully established");
+        
+        // Cache the token for future use
+        save_cached_token(account, user, role, &sf.token);
+        
         Ok(sf)
     }
 
@@ -829,5 +860,37 @@ fn json_to_value(v: &serde_json::Value) -> Value {
             }
         }
         other => Value::Text(other.to_string()),
+    }
+}
+
+fn cache_file_path() -> std::path::PathBuf {
+    crate::config::config_dir().join("sf_tokens.json")
+}
+
+fn get_cached_token(account: &str, user: &str, role: Option<&str>) -> Option<String> {
+    let path = cache_file_path();
+    let contents = std::fs::read_to_string(&path).ok()?;
+    let cache: std::collections::HashMap<String, String> = serde_json::from_str(&contents).ok()?;
+    let key = format!("{}:{}:{}", account, user, role.unwrap_or(""));
+    cache.get(&key).cloned()
+}
+
+fn save_cached_token(account: &str, user: &str, role: Option<&str>, token: &str) {
+    let path = cache_file_path();
+    let mut cache: std::collections::HashMap<String, String> = if let Ok(contents) = std::fs::read_to_string(&path) {
+        serde_json::from_str(&contents).unwrap_or_default()
+    } else {
+        std::collections::HashMap::new()
+    };
+    
+    let key = format!("{}:{}:{}", account, user, role.unwrap_or(""));
+    cache.insert(key, token.to_string());
+    
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    
+    if let Ok(json) = serde_json::to_string_pretty(&cache) {
+        let _ = std::fs::write(path, json);
     }
 }
