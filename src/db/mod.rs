@@ -38,7 +38,7 @@ pub struct QueryResult {
 
 /// A node in the schema object tree returned by backends.
 /// Each backend builds its own hierarchy (e.g. schema → tables → columns).
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SchemaNode {
     pub label: String,
     pub children: Vec<SchemaNode>,
@@ -54,10 +54,20 @@ impl SchemaNode {
     }
 }
 
+/// Callback invoked by backends during slow `schema_tree` operations to
+/// report progress. The string is shown in the connection modal.
+pub type ProgressFn = dyn Fn(&str) + Send + Sync;
+
+/// Returns a `ProgressFn` that does nothing — useful for callers that
+/// don't care about progress (e.g. CLI tools, tests).
+pub fn no_progress() -> Box<ProgressFn> {
+    Box::new(|_| {})
+}
+
 /// Trait that all database backends implement.
 pub trait Database: Send {
     fn execute_query(&mut self, sql: &str) -> Result<QueryResult, String>;
-    fn schema_tree(&mut self) -> Result<Vec<SchemaNode>, String>;
+    fn schema_tree(&mut self, progress: &ProgressFn) -> Result<Vec<SchemaNode>, String>;
 }
 
 #[cfg(test)]
@@ -99,7 +109,7 @@ impl Database for MockDatabase {
             .unwrap_or(Err("no more mock results".into()))
     }
 
-    fn schema_tree(&mut self) -> Result<Vec<SchemaNode>, String> {
+    fn schema_tree(&mut self, _progress: &ProgressFn) -> Result<Vec<SchemaNode>, String> {
         Ok(self.schema.clone())
     }
 }

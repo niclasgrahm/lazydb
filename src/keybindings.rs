@@ -72,6 +72,7 @@ pub struct SidebarKeysConfig {
     pub collapse: KeyInput,
     pub activate: KeyInput,
     pub preview: KeyInput,
+    pub refresh_schema: KeyInput,
 }
 
 impl Default for SidebarKeysConfig {
@@ -83,6 +84,7 @@ impl Default for SidebarKeysConfig {
             collapse: KeyInput::Multiple(vec!["h".into(), "left".into()]),
             activate: KeyInput::Single("enter".into()),
             preview: KeyInput::Single("s".into()),
+            refresh_schema: KeyInput::Single("R".into()),
         }
     }
 }
@@ -161,7 +163,7 @@ impl KeyBind {
             "pageup" => KeyCode::PageUp,
             "pagedown" => KeyCode::PageDown,
             "space" => KeyCode::Char(' '),
-            s if s.len() == 1 => KeyCode::Char(s.chars().next().unwrap()),
+            s if s.len() == 1 => KeyCode::Char(key_str.chars().next().unwrap()),
             _ => KeyCode::Null,
         };
 
@@ -208,6 +210,7 @@ pub struct SidebarKeys {
     pub collapse: Action,
     pub activate: Action,
     pub preview: Action,
+    pub refresh_schema: Action,
 }
 
 pub struct ResultsKeys {
@@ -252,6 +255,7 @@ impl Keybindings {
                 collapse: Action::from_config(&config.sidebar.collapse),
                 activate: Action::from_config(&config.sidebar.activate),
                 preview: Action::from_config(&config.sidebar.preview),
+                refresh_schema: Action::from_config(&config.sidebar.refresh_schema),
             },
             results: ResultsKeys {
                 scroll_up: Action::from_config(&config.results.scroll_up),
@@ -373,6 +377,22 @@ mod tests {
         let kb = Keybindings::from_config(config);
         let backslash = KeyEvent::new(KeyCode::Char('\\'), KeyModifiers::empty());
         assert!(kb.leader.matches(&backslash));
+    }
+
+    #[test]
+    fn default_refresh_schema_is_shift_r() {
+        let kb = Keybindings::from_config(KeybindingsConfig::default());
+        let shift_r = KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT);
+        assert!(kb.sidebar.refresh_schema.matches(&shift_r));
+    }
+
+    #[test]
+    fn custom_refresh_schema_key() {
+        let toml_str = "[sidebar]\nrefresh_schema = \"r\"";
+        let cfg: KeybindingsConfig = toml::from_str(toml_str).unwrap();
+        let kb = Keybindings::from_config(cfg);
+        let plain_r = KeyEvent::new(KeyCode::Char('r'), KeyModifiers::empty());
+        assert!(kb.sidebar.refresh_schema.matches(&plain_r));
     }
 
     #[test]

@@ -96,6 +96,14 @@ pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
             if is_connected {
                 spans.push(Span::styled(" ●", Style::default().fg(Color::Green)));
             }
+            if node.depth == 0 && app.cached_connections.contains(&node.label) {
+                spans.push(Span::styled(
+                    " (cached)",
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
+                ));
+            }
 
             ListItem::new(Line::from(spans))
         })

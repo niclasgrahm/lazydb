@@ -1,7 +1,7 @@
 use duckdb::types::ValueRef;
 use duckdb::Connection;
 
-use super::{Database, QueryResult, SchemaNode, Value};
+use super::{Database, ProgressFn, QueryResult, SchemaNode, Value};
 
 pub struct DuckDb {
     conn: Connection,
@@ -55,13 +55,15 @@ impl Database for DuckDb {
         Ok(QueryResult { columns, rows })
     }
 
-    fn schema_tree(&mut self) -> Result<Vec<SchemaNode>, String> {
+    fn schema_tree(&mut self, progress: &ProgressFn) -> Result<Vec<SchemaNode>, String> {
+        progress("listing schemas…");
         let schemas = self.query_string_list(
             "SELECT schema_name FROM information_schema.schemata \
              WHERE catalog_name = current_database() \
              AND schema_name NOT IN ('information_schema', 'pg_catalog') \
              ORDER BY schema_name",
         )?;
+        progress("fetching tables…");
 
         let mut nodes = Vec::new();
         for schema in schemas {

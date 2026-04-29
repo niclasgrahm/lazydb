@@ -6,6 +6,7 @@ mod files;
 mod highlight;
 mod keybindings;
 mod recents;
+mod schema_cache;
 mod tree;
 mod ui;
 mod vim;

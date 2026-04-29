@@ -1,6 +1,6 @@
 use serde_json;
 
-use super::{Database, QueryResult, SchemaNode, Value};
+use super::{Database, ProgressFn, QueryResult, SchemaNode, Value};
 
 pub struct ClickHouse {
     base_url: String,
@@ -135,13 +135,15 @@ impl Database for ClickHouse {
         Ok(QueryResult { columns, rows })
     }
 
-    fn schema_tree(&mut self) -> Result<Vec<SchemaNode>, String> {
+    fn schema_tree(&mut self, progress: &ProgressFn) -> Result<Vec<SchemaNode>, String> {
+        progress("fetching tables…");
         let table_names = self.query_string_list(&format!(
             "SELECT name FROM system.tables \
              WHERE database = '{}' AND engine != 'View' \
              ORDER BY name",
             self.database
         ))?;
+        progress("fetching views…");
         let view_names = self.query_string_list(&format!(
             "SELECT name FROM system.tables \
              WHERE database = '{}' AND engine = 'View' \

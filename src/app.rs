@@ -10,12 +10,13 @@ use ratatui::{
 };
 use tui_textarea::{Input, TextArea};
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crate::config::{AppConfig, Connection, Profiles};
-use crate::db::{self, Database, QueryResult, SchemaNode};
+use crate::db::{self, Database, ProgressFn, QueryResult, SchemaNode};
+use crate::schema_cache;
 use crate::keybindings::{Keybindings, LeaderEntry};
 use crate::recents::{RecentEntry, Recents};
 use crate::tree::TreeNode;
@@ -94,14 +95,30 @@ pub enum SidebarNodeKind {
 pub const RESULTS_PAGE_SIZE: usize = 100;
 
 pub enum BgResult {
+    Progress {
+        message: String,
+    },
     Connected {
         label: String,
-        result: Result<(Box<dyn Database>, Vec<SchemaNode>), String>,
+        result: Result<(Box<dyn Database>, Vec<SchemaNode>, ConnectSource), String>,
+    },
+    SchemaRefreshed {
+        label: String,
+        conn: Box<dyn Database>,
+        result: Result<Vec<SchemaNode>, String>,
     },
     Query {
         conn: Box<dyn Database>,
         result: Result<(QueryResult, Duration, bool), String>,
     },
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum ConnectSource {
+    /// Schema was loaded from the on-disk cache; no live fetch happened.
+    Cache,
+    /// Schema was freshly fetched from the database.
+    Live,
 }
 
 pub struct App<'a> {
@@ -132,6 +149,9 @@ pub struct App<'a> {
     pub loading: Option<String>,
     pub spinner_tick: usize,
     bg_receiver: Option<mpsc::Receiver<BgResult>>,
+    /// Connection labels whose sidebar tree was loaded from the on-disk cache
+    /// rather than a live fetch. Cleared once a fresh fetch repopulates them.
+    pub cached_connections: HashSet<String>,
     pub sidebar_filter: String,
     pub sidebar_filtering: bool,
     pub file_filter: String,
@@ -206,6 +226,7 @@ impl<'a> App<'a> {
             loading: None,
             spinner_tick: 0,
             bg_receiver: None,
+            cached_connections: HashSet::new(),
             sidebar_filter: String::new(),
             sidebar_filtering: false,
             file_filter: String::new(),
@@ -762,6 +783,10 @@ impl<'a> App<'a> {
             if let Some(selected) = self.sidebar_state.selected() {
                 self.preview_table(selected);
             }
+        } else if kb.refresh_schema.matches(key) {
+            if self.connected_db.is_some() && self.connection.is_some() {
+                self.refresh_schema();
+            }
         }
     }
 
@@ -1031,6 +1056,7 @@ impl<'a> App<'a> {
             info!(label = %label, "disconnecting from database");
             self.connection = None;
             self.connected_db = None;
+            self.cached_connections.remove(&label);
             self.clear_schema(&label);
             TreeNode::collapse_at_index(&mut self.sidebar_items, flat_index);
         } else {
@@ -1038,6 +1064,7 @@ impl<'a> App<'a> {
             if let Some(prev) = &self.connected_db {
                 self.connection = None;
                 let prev = prev.clone();
+                self.cached_connections.remove(&prev);
                 self.clear_schema(&prev);
                 for node in self.sidebar_items.iter_mut() {
                     if node.label == prev && node.expanded {
@@ -1054,20 +1081,43 @@ impl<'a> App<'a> {
                 .and_then(|k| self.profiles.connections.get(k))
                 .cloned();
 
-            if let Some(profile) = profile {
+            if let (Some(profile), Some(profile_key)) = (profile, profile_key) {
                 info!(label = %label, "connecting to database");
+
+                // Decide whether to use the on-disk cache. Only consult the cache
+                // when the profile opts in via `cache_schema = true`.
+                let cached_schema = if profile.cache_schema() {
+                    schema_cache::load(&profile_key)
+                } else {
+                    None
+                };
+                let used_cache = cached_schema.is_some();
+
                 let (tx, rx) = mpsc::channel();
                 self.bg_receiver = Some(rx);
-                self.loading = Some("Connecting…".into());
+                self.loading = Some(format!("Connecting to {label}…"));
                 self.spinner_tick = 0;
 
                 let label_clone = label.clone();
+                let tx_progress = tx.clone();
                 std::thread::spawn(move || {
-                    let result = Self::connect_profile(&profile);
-                    let result = match result {
+                    let progress: Box<ProgressFn> = {
+                        let tx = tx_progress;
+                        Box::new(move |msg: &str| {
+                            let _ = tx.send(BgResult::Progress { message: msg.into() });
+                        })
+                    };
+
+                    progress(&format!("Connecting to {label_clone}…"));
+                    let result = match profile.connect() {
                         Ok(mut db) => {
-                            let schema = db.schema_tree().unwrap_or_default();
-                            Ok((db, schema))
+                            if let Some(cached) = cached_schema {
+                                Ok((db, cached, ConnectSource::Cache))
+                            } else {
+                                progress("fetching schema…");
+                                let schema = db.schema_tree(&progress).unwrap_or_default();
+                                Ok((db, schema, ConnectSource::Live))
+                            }
                         }
                         Err(e) => Err(e),
                     };
@@ -1076,6 +1126,12 @@ impl<'a> App<'a> {
                         result,
                     });
                 });
+
+                // Pre-record the cached marker so the indicator shows the moment
+                // the schema is populated. Cleared again on a Live source.
+                if used_cache {
+                    self.cached_connections.insert(label.clone());
+                }
             }
         }
     }
@@ -1168,29 +1224,81 @@ impl<'a> App<'a> {
             None => return false,
         };
 
-        self.loading = None;
-        self.bg_receiver = None;
-
         match result {
-            BgResult::Connected { label, result } => match result {
-                Ok((db, schema)) => {
-                    info!(label = %label, schema_nodes = schema.len(), "connection established successfully");
-                    self.populate_schema(&label, schema);
-                    self.connection = Some(db);
-                    self.connected_db = Some(label.clone());
-                    // Expand the connection node
-                    let new_flat = TreeNode::flatten_all(&self.sidebar_items);
-                    if let Some(new_idx) = new_flat.iter().position(|n| n.label == label) {
-                        TreeNode::toggle_at_index(&mut self.sidebar_items, new_idx);
-                        self.sidebar_state.select(Some(new_idx));
+            BgResult::Progress { message } => {
+                // Keep the receiver alive — more messages may follow.
+                self.loading = Some(message);
+                return true;
+            }
+            BgResult::Connected { label, result } => {
+                self.loading = None;
+                self.bg_receiver = None;
+                match result {
+                    Ok((db, schema, source)) => {
+                        info!(
+                            label = %label,
+                            schema_nodes = schema.len(),
+                            source = ?source,
+                            "connection established successfully"
+                        );
+                        // Persist freshly-fetched schemas if the profile opts in.
+                        if matches!(source, ConnectSource::Live) {
+                            if let Some(profile_key) = self.label_to_profile.get(&label).cloned() {
+                                if let Some(profile) = self.profiles.connections.get(&profile_key) {
+                                    if profile.cache_schema() {
+                                        if let Err(e) = schema_cache::save(&profile_key, &schema) {
+                                            debug!(error = %e, "failed to persist schema cache");
+                                        }
+                                    }
+                                }
+                            }
+                            self.cached_connections.remove(&label);
+                        }
+                        self.populate_schema(&label, schema);
+                        self.connection = Some(db);
+                        self.connected_db = Some(label.clone());
+                        // Expand the connection node
+                        let new_flat = TreeNode::flatten_all(&self.sidebar_items);
+                        if let Some(new_idx) = new_flat.iter().position(|n| n.label == label) {
+                            TreeNode::toggle_at_index(&mut self.sidebar_items, new_idx);
+                            self.sidebar_state.select(Some(new_idx));
+                        }
+                    }
+                    Err(e) => {
+                        error!(label = %label, error = %e, "connection failed");
+                        self.cached_connections.remove(&label);
+                        self.show_error(format!("Connection failed: {e}"));
                     }
                 }
-                Err(e) => {
-                    error!(label = %label, error = %e, "connection failed");
-                    self.show_error(format!("Connection failed: {e}"));
+            }
+            BgResult::SchemaRefreshed { label, conn, result } => {
+                self.loading = None;
+                self.bg_receiver = None;
+                self.connection = Some(conn);
+                match result {
+                    Ok(schema) => {
+                        info!(label = %label, schema_nodes = schema.len(), "schema refreshed");
+                        if let Some(profile_key) = self.label_to_profile.get(&label).cloned() {
+                            if let Some(profile) = self.profiles.connections.get(&profile_key) {
+                                if profile.cache_schema() {
+                                    if let Err(e) = schema_cache::save(&profile_key, &schema) {
+                                        debug!(error = %e, "failed to persist schema cache");
+                                    }
+                                }
+                            }
+                        }
+                        self.cached_connections.remove(&label);
+                        self.populate_schema(&label, schema);
+                    }
+                    Err(e) => {
+                        error!(label = %label, error = %e, "schema refresh failed");
+                        self.show_error(format!("Schema refresh failed: {e}"));
+                    }
                 }
-            },
+            }
             BgResult::Query { conn, result } => {
+                self.loading = None;
+                self.bg_receiver = None;
                 self.connection = Some(conn);
                 match result {
                     Ok((query_result, duration, has_more)) => {
@@ -1249,19 +1357,36 @@ impl<'a> App<'a> {
         self.recents.save();
     }
 
+    /// Spawn a background thread to re-fetch the schema for the currently
+    /// connected database. The connection is moved into the thread and
+    /// returned via `BgResult::SchemaRefreshed`.
     fn refresh_schema(&mut self) {
         let Some(label) = self.connected_db.clone() else { return };
-        let Some(conn) = self.connection.as_mut() else { return };
+        let Some(conn) = self.connection.take() else { return };
         debug!(label = %label, "refreshing schema tree");
-        match conn.schema_tree() {
-            Ok(tree) => {
-                debug!(label = %label, nodes = tree.len(), "schema tree refreshed");
-                self.populate_schema(&label, tree);
-            }
-            Err(e) => {
-                debug!(label = %label, error = %e, "schema refresh failed (silent)");
-            }
-        }
+
+        let (tx, rx) = mpsc::channel();
+        self.bg_receiver = Some(rx);
+        self.loading = Some(format!("Refreshing schema for {label}…"));
+        self.spinner_tick = 0;
+
+        let label_clone = label.clone();
+        let tx_progress = tx.clone();
+        std::thread::spawn(move || {
+            let mut conn = conn;
+            let progress: Box<ProgressFn> = {
+                let tx = tx_progress;
+                Box::new(move |msg: &str| {
+                    let _ = tx.send(BgResult::Progress { message: msg.into() });
+                })
+            };
+            let result = conn.schema_tree(&progress);
+            let _ = tx.send(BgResult::SchemaRefreshed {
+                label: label_clone,
+                conn,
+                result,
+            });
+        });
     }
 
     fn populate_schema(&mut self, connection_label: &str, schema_nodes: Vec<SchemaNode>) {
@@ -1365,7 +1490,10 @@ mod tests {
         let mut connections = BTreeMap::new();
         connections.insert(
             "testdb".into(),
-            Connection::DuckDb(DuckDbConnection { path: ":memory:".into() }),
+            Connection::DuckDb(DuckDbConnection {
+                path: ":memory:".into(),
+                cache_schema: false,
+            }),
         );
         connections.insert(
             "pgdb".into(),
@@ -1376,6 +1504,7 @@ mod tests {
                 password: None,
                 database: "testdb".into(),
                 schema: None,
+                cache_schema: false,
             }),
         );
         Profiles { connections }
@@ -1776,7 +1905,7 @@ mod tests {
             label: label.clone(),
             result: Ok((Box::new(mock), vec![
                 SchemaNode::group("Tables", vec![SchemaNode::leaf("users")]),
-            ])),
+            ], ConnectSource::Live)),
         }).unwrap();
 
         app.poll_background();

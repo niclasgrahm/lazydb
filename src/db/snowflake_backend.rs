@@ -6,7 +6,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{debug, error, info};
 
-use super::{Database, QueryResult, SchemaNode, Value};
+use super::{Database, ProgressFn, QueryResult, SchemaNode, Value};
 
 enum AuthMethod {
     Session,
@@ -509,7 +509,11 @@ impl Snowflake {
     }
 
     fn query_string_list(&self, sql: &str) -> Result<Vec<String>, String> {
-        debug!(sql, "snowflake: query_string_list");
+        self.query_string_column(sql, 0)
+    }
+
+    fn query_string_column(&self, sql: &str, col_idx: usize) -> Result<Vec<String>, String> {
+        debug!(sql, col_idx, "snowflake: query_string_column");
         let json = self.raw_query(sql)?;
         let rows = json["data"]
             .as_array()
@@ -518,7 +522,7 @@ impl Snowflake {
         let mut result = Vec::new();
         for row in rows {
             if let Some(arr) = row.as_array() {
-                if let Some(val) = arr.first().and_then(|v| v.as_str()) {
+                if let Some(val) = arr.get(col_idx).and_then(|v| v.as_str()) {
                     result.push(val.to_string());
                 }
             }
@@ -526,29 +530,97 @@ impl Snowflake {
         Ok(result)
     }
 
-    fn query_columns(&self, schema: &str, table: &str) -> Result<Vec<SchemaNode>, String> {
-        debug!(schema_name = schema, table, "snowflake: fetching columns");
-        let sql = format!(
-            "SELECT COLUMN_NAME, DATA_TYPE \
-             FROM INFORMATION_SCHEMA.COLUMNS \
-             WHERE TABLE_SCHEMA = '{}' AND TABLE_NAME = '{}' \
-             ORDER BY ORDINAL_POSITION",
-            schema, table
-        );
-        let json = self.raw_query(&sql)?;
-        let rows = json["data"]
-            .as_array()
-            .ok_or("Expected 'data' array in response")?;
+    fn list_accessible_databases(&self) -> Result<Vec<String>, String> {
+        debug!("snowflake: listing accessible databases via SHOW DATABASES");
+        // SHOW DATABASES result: created_on(0), name(1), is_default(2), ...
+        self.query_string_column("SHOW DATABASES", 1)
+    }
 
-        let mut result = Vec::new();
-        for row in rows {
-            if let Some(arr) = row.as_array() {
-                let name = arr.first().and_then(|v| v.as_str()).unwrap_or("?");
-                let data_type = arr.get(1).and_then(|v| v.as_str()).unwrap_or("?");
-                result.push(SchemaNode::leaf(format!("{name} ({data_type})")));
+    fn introspect_database(&self, db: &str) -> Result<Option<SchemaNode>, String> {
+        debug!(database = db, "snowflake: introspecting database");
+
+        let schemas = self.query_string_list(&format!(
+            "SELECT SCHEMA_NAME FROM {db}.INFORMATION_SCHEMA.SCHEMATA \
+             WHERE CATALOG_NAME = '{db}' \
+             AND SCHEMA_NAME != 'INFORMATION_SCHEMA' \
+             ORDER BY SCHEMA_NAME"
+        ))?;
+
+        if schemas.is_empty() {
+            return Ok(None);
+        }
+
+        let schema_list = schemas
+            .iter()
+            .map(|s| format!("'{s}'"))
+            .collect::<Vec<_>>()
+            .join(",");
+
+        let tables_rows = self.raw_query_rows(&format!(
+            "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE \
+             FROM {db}.INFORMATION_SCHEMA.TABLES \
+             WHERE TABLE_SCHEMA IN ({schema_list}) \
+             AND TABLE_TYPE IN ('BASE TABLE', 'VIEW') \
+             ORDER BY TABLE_SCHEMA, TABLE_TYPE, TABLE_NAME"
+        ))?;
+
+        let columns_rows = self.raw_query_rows(&format!(
+            "SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE \
+             FROM {db}.INFORMATION_SCHEMA.COLUMNS \
+             WHERE TABLE_SCHEMA IN ({schema_list}) \
+             ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION"
+        ))?;
+
+        let mut column_map: HashMap<(String, String), Vec<SchemaNode>> = HashMap::new();
+        for row in &columns_rows {
+            if row.len() >= 4 {
+                let key = (row[0].clone(), row[1].clone());
+                column_map
+                    .entry(key)
+                    .or_default()
+                    .push(SchemaNode::leaf(format!("{} ({})", row[2], row[3])));
             }
         }
-        Ok(result)
+
+        let mut table_map: HashMap<String, (Vec<SchemaNode>, Vec<SchemaNode>)> = HashMap::new();
+        for row in &tables_rows {
+            if row.len() >= 3 {
+                let schema = &row[0];
+                let table_name = &row[1];
+                let table_type = &row[2];
+                let cols = column_map
+                    .remove(&(schema.clone(), table_name.clone()))
+                    .unwrap_or_default();
+                let node = SchemaNode::group(table_name.clone(), cols);
+                let entry = table_map.entry(schema.clone()).or_default();
+                if table_type == "BASE TABLE" {
+                    entry.0.push(node);
+                } else {
+                    entry.1.push(node);
+                }
+            }
+        }
+
+        let mut schema_nodes = Vec::new();
+        for schema_name in &schemas {
+            let (tables, views) = table_map.remove(schema_name).unwrap_or_default();
+            let mut children = Vec::new();
+            if !tables.is_empty() {
+                children.push(SchemaNode::group("Tables", tables));
+            }
+            if !views.is_empty() {
+                children.push(SchemaNode::group("Views", views));
+            }
+            if !children.is_empty() {
+                schema_nodes.push(SchemaNode::group(schema_name.clone(), children));
+            }
+        }
+
+        if schema_nodes.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(SchemaNode::group(db.to_string(), schema_nodes)))
     }
 
     fn raw_query_rows(&self, sql: &str) -> Result<Vec<Vec<String>>, String> {
@@ -602,108 +674,27 @@ impl Database for Snowflake {
         Ok(QueryResult { columns, rows })
     }
 
-    fn schema_tree(&mut self) -> Result<Vec<SchemaNode>, String> {
-        info!(database = %self.database, schema = %self.schema, "snowflake: fetching schema tree");
+    fn schema_tree(&mut self, progress: &ProgressFn) -> Result<Vec<SchemaNode>, String> {
+        info!("snowflake: fetching schema tree for all accessible databases");
         let start = Instant::now();
 
-        // Query 1: Get all schemas
-        let schemas = self.query_string_list(&format!(
-            "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA \
-             WHERE CATALOG_NAME = '{}' \
-             AND SCHEMA_NAME != 'INFORMATION_SCHEMA' \
-             ORDER BY SCHEMA_NAME",
-            self.database
-        ))?;
-        debug!(schema_count = schemas.len(), ?schemas, "snowflake: found schemas");
+        progress("listing accessible databases…");
+        let databases = self.list_accessible_databases()?;
+        debug!(db_count = databases.len(), ?databases, "snowflake: found accessible databases");
 
-        if schemas.is_empty() {
-            info!(elapsed_ms = start.elapsed().as_millis(), "snowflake: schema tree complete (no schemas)");
-            return Ok(vec![]);
-        }
-
-        let schema_list = schemas
-            .iter()
-            .map(|s| format!("'{s}'"))
-            .collect::<Vec<_>>()
-            .join(",");
-
-        // Query 2: Get all tables and views across all schemas in one query
-        let tables_rows = self.raw_query_rows(&format!(
-            "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE \
-             FROM INFORMATION_SCHEMA.TABLES \
-             WHERE TABLE_SCHEMA IN ({schema_list}) \
-             AND TABLE_TYPE IN ('BASE TABLE', 'VIEW') \
-             ORDER BY TABLE_SCHEMA, TABLE_TYPE, TABLE_NAME"
-        ))?;
-        debug!(row_count = tables_rows.len(), "snowflake: fetched all tables/views");
-
-        // Query 3: Get all columns across all schemas in one query
-        let columns_rows = self.raw_query_rows(&format!(
-            "SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE \
-             FROM INFORMATION_SCHEMA.COLUMNS \
-             WHERE TABLE_SCHEMA IN ({schema_list}) \
-             ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION"
-        ))?;
-        debug!(row_count = columns_rows.len(), "snowflake: fetched all columns");
-
-        // Build column map: (schema, table) -> Vec<SchemaNode>
-        let mut column_map: HashMap<(String, String), Vec<SchemaNode>> = HashMap::new();
-        for row in &columns_rows {
-            if row.len() >= 4 {
-                let key = (row[0].clone(), row[1].clone());
-                column_map
-                    .entry(key)
-                    .or_default()
-                    .push(SchemaNode::leaf(format!("{} ({})", row[2], row[3])));
+        let total = databases.len();
+        let mut db_nodes = Vec::new();
+        for (i, db) in databases.iter().enumerate() {
+            progress(&format!("fetching schema ({}/{total}): {db}", i + 1));
+            match self.introspect_database(db) {
+                Ok(Some(node)) => db_nodes.push(node),
+                Ok(None) => debug!(database = db, "snowflake: skipping empty database"),
+                Err(e) => debug!(database = db, error = %e, "snowflake: failed to introspect database, skipping"),
             }
         }
 
-        // Build table map: schema -> (tables, views)
-        let mut table_map: HashMap<String, (Vec<SchemaNode>, Vec<SchemaNode>)> = HashMap::new();
-        for row in &tables_rows {
-            if row.len() >= 3 {
-                let schema = &row[0];
-                let table_name = &row[1];
-                let table_type = &row[2];
-                let cols = column_map
-                    .remove(&(schema.clone(), table_name.clone()))
-                    .unwrap_or_default();
-                let node = SchemaNode::group(table_name.clone(), cols);
-                let entry = table_map.entry(schema.clone()).or_default();
-                if table_type == "BASE TABLE" {
-                    entry.0.push(node);
-                } else {
-                    entry.1.push(node);
-                }
-            }
-        }
-
-        // Assemble schema nodes in original order
-        let mut schema_nodes = Vec::new();
-        for schema_name in &schemas {
-            let (tables, views) = table_map.remove(schema_name).unwrap_or_default();
-            let mut children = Vec::new();
-            if !tables.is_empty() {
-                children.push(SchemaNode::group("Tables", tables));
-            }
-            if !views.is_empty() {
-                children.push(SchemaNode::group("Views", views));
-            }
-            debug!(
-                schema = %schema_name,
-                tables = children.iter().find(|c| c.label == "Tables").map(|c| c.children.len()).unwrap_or(0),
-                views = children.iter().find(|c| c.label == "Views").map(|c| c.children.len()).unwrap_or(0),
-                "snowflake: schema introspection done"
-            );
-            if !children.is_empty() {
-                schema_nodes.push(SchemaNode::group(schema_name.clone(), children));
-            }
-        }
-
-        info!(total_schemas = schema_nodes.len(), elapsed_ms = start.elapsed().as_millis(), "snowflake: schema tree complete");
-
-        // Wrap in a database-level node
-        Ok(vec![SchemaNode::group(self.database.clone(), schema_nodes)])
+        info!(total_databases = db_nodes.len(), elapsed_ms = start.elapsed().as_millis(), "snowflake: schema tree complete");
+        Ok(db_nodes)
     }
 }
 

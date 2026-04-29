@@ -93,6 +93,8 @@ pub enum Connection {
 #[derive(Debug, Clone, Deserialize)]
 pub struct DuckDbConnection {
     pub path: String,
+    #[serde(default)]
+    pub cache_schema: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -106,6 +108,8 @@ pub struct PostgresConnection {
     pub database: String,
     #[serde(default)]
     pub schema: Option<String>,
+    #[serde(default)]
+    pub cache_schema: bool,
 }
 
 fn default_pg_port() -> u16 {
@@ -139,6 +143,8 @@ pub struct ClickHouseConnection {
     pub password: Option<String>,
     #[serde(default = "default_clickhouse_database")]
     pub database: String,
+    #[serde(default)]
+    pub cache_schema: bool,
 }
 
 fn default_clickhouse_url() -> String {
@@ -176,6 +182,8 @@ pub struct SnowflakeConnection {
     pub schema: Option<String>,
     #[serde(default)]
     pub role: Option<String>,
+    #[serde(default)]
+    pub cache_schema: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -187,6 +195,8 @@ pub struct DatabricksConnection {
     pub catalog: Option<String>,
     #[serde(default)]
     pub schema: Option<String>,
+    #[serde(default)]
+    pub cache_schema: bool,
 }
 
 impl Connection {
@@ -197,6 +207,16 @@ impl Connection {
             Connection::ClickHouse(_) => "clickhouse",
             Connection::Snowflake(_) => "snowflake",
             Connection::Databricks(_) => "databricks",
+        }
+    }
+
+    pub fn cache_schema(&self) -> bool {
+        match self {
+            Connection::DuckDb(c) => c.cache_schema,
+            Connection::Postgres(c) => c.cache_schema,
+            Connection::ClickHouse(c) => c.cache_schema,
+            Connection::Snowflake(c) => c.cache_schema,
+            Connection::Databricks(c) => c.cache_schema,
         }
     }
 
@@ -293,7 +313,7 @@ mod tests {
         let profiles: Profiles = toml::from_str(toml).unwrap();
         assert!(matches!(
             profiles.connections.get("mydb"),
-            Some(Connection::DuckDb(DuckDbConnection { path })) if path == "/tmp/test.duckdb"
+            Some(Connection::DuckDb(DuckDbConnection { path, .. })) if path == "/tmp/test.duckdb"
         ));
     }
 
@@ -353,6 +373,7 @@ mod tests {
             password: Some("secret".into()),
             database: "mydb".into(),
             schema: None,
+            cache_schema: false,
         };
         let s = pg.connection_string();
         assert!(s.contains("host=localhost"));
@@ -371,6 +392,7 @@ mod tests {
             password: None,
             database: "mydb".into(),
             schema: None,
+            cache_schema: false,
         };
         let s = pg.connection_string();
         assert!(!s.contains("password"));
@@ -385,6 +407,7 @@ mod tests {
             password: None,
             database: "db".into(),
             schema: None,
+            cache_schema: false,
         };
         assert_eq!(pg.schema_name(), "public");
     }
@@ -398,6 +421,7 @@ mod tests {
             password: None,
             database: "db".into(),
             schema: Some("reporting".into()),
+            cache_schema: false,
         };
         assert_eq!(pg.schema_name(), "reporting");
     }
@@ -482,17 +506,19 @@ mod tests {
 
     #[test]
     fn type_name_variants() {
-        let duckdb = Connection::DuckDb(DuckDbConnection { path: "x".into() });
+        let duckdb = Connection::DuckDb(DuckDbConnection { path: "x".into(), cache_schema: false });
         assert_eq!(duckdb.type_name(), "duckdb");
 
         let pg = Connection::Postgres(PostgresConnection {
             host: "h".into(), port: 5432, user: "u".into(),
             password: None, database: "d".into(), schema: None,
+            cache_schema: false,
         });
         assert_eq!(pg.type_name(), "postgres");
 
         let ch = Connection::ClickHouse(ClickHouseConnection {
             url: "u".into(), user: "u".into(), password: None, database: "d".into(),
+            cache_schema: false,
         });
         assert_eq!(ch.type_name(), "clickhouse");
 
@@ -500,12 +526,14 @@ mod tests {
             account: "a".into(),
             auth: SnowflakeAuth::Browser { user: "u".into() },
             database: "d".into(), warehouse: None, schema: None, role: None,
+            cache_schema: false,
         });
         assert_eq!(sf.type_name(), "snowflake");
 
         let db = Connection::Databricks(DatabricksConnection {
             host: "h".into(), token: "t".into(), warehouse_id: "w".into(),
             catalog: None, schema: None,
+            cache_schema: false,
         });
         assert_eq!(db.type_name(), "databricks");
     }
@@ -564,6 +592,61 @@ mod tests {
     fn config_custom_max_recents() {
         let config: AppConfig = toml::from_str("max_recents = 25").unwrap();
         assert_eq!(config.max_recents, 25);
+    }
+
+    #[test]
+    fn cache_schema_defaults_to_false() {
+        let toml = r#"
+            [connections.pg]
+            type = "postgres"
+            host = "h"
+            user = "u"
+            database = "d"
+        "#;
+        let profiles: Profiles = toml::from_str(toml).unwrap();
+        let conn = profiles.connections.get("pg").unwrap();
+        assert!(!conn.cache_schema());
+    }
+
+    #[test]
+    fn cache_schema_parses_when_set() {
+        let toml = r#"
+            [connections.sf]
+            type = "snowflake"
+            account = "x"
+            auth = "browser"
+            user = "u"
+            database = "d"
+            cache_schema = true
+        "#;
+        let profiles: Profiles = toml::from_str(toml).unwrap();
+        let conn = profiles.connections.get("sf").unwrap();
+        assert!(conn.cache_schema());
+    }
+
+    #[test]
+    fn cache_schema_on_each_variant() {
+        let cases = [
+            (r#"type = "duckdb"
+                path = "/tmp/x.db"
+                cache_schema = true"#, true),
+            (r#"type = "clickhouse"
+                cache_schema = true"#, true),
+            (r#"type = "databricks"
+                host = "h"
+                token = "t"
+                warehouse_id = "w"
+                cache_schema = true"#, true),
+        ];
+        for (body, expected) in cases {
+            let toml = format!("[connections.c]\n{body}");
+            let profiles: Profiles = toml::from_str(&toml).expect(&toml);
+            assert_eq!(
+                profiles.connections.get("c").unwrap().cache_schema(),
+                expected,
+                "for body: {body}"
+            );
+        }
     }
 
     #[test]

@@ -5,7 +5,7 @@ use std::time::Duration;
 use serde_json::{self, json};
 use tracing::debug;
 
-use super::{Database, QueryResult, SchemaNode, Value};
+use super::{Database, ProgressFn, QueryResult, SchemaNode, Value};
 
 pub struct Databricks {
     base_url: String,
@@ -247,15 +247,18 @@ impl Database for Databricks {
         Ok(QueryResult { columns, rows })
     }
 
-    fn schema_tree(&mut self) -> Result<Vec<SchemaNode>, String> {
+    fn schema_tree(&mut self, progress: &ProgressFn) -> Result<Vec<SchemaNode>, String> {
+        progress("listing catalogs…");
         let catalogs = if let Some(cat) = &self.catalog {
             vec![cat.clone()]
         } else {
             self.query_string_list("SHOW CATALOGS")?
         };
 
+        let total = catalogs.len();
         let mut catalog_nodes = Vec::new();
-        for catalog in &catalogs {
+        for (i, catalog) in catalogs.iter().enumerate() {
+            progress(&format!("fetching catalog ({}/{total}): {catalog}", i + 1));
             let schemas = self.query_string_list(&format!(
                 "SELECT schema_name FROM {catalog}.information_schema.schemata \
                  WHERE schema_name != 'information_schema' \

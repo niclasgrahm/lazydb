@@ -1,7 +1,7 @@
 use postgres::types::Type;
 use postgres::Client;
 
-use super::{Database, QueryResult, SchemaNode, Value};
+use super::{Database, ProgressFn, QueryResult, SchemaNode, Value};
 
 pub struct Postgres {
     client: Client,
@@ -63,11 +63,14 @@ impl Database for Postgres {
         })
     }
 
-    fn schema_tree(&mut self) -> Result<Vec<SchemaNode>, String> {
+    fn schema_tree(&mut self, progress: &ProgressFn) -> Result<Vec<SchemaNode>, String> {
+        progress("listing schemas…");
         let schema_names = self.query_all_schemas()?;
+        let total = schema_names.len();
         let mut schema_nodes = Vec::new();
 
-        for schema_name in schema_names {
+        for (i, schema_name) in schema_names.into_iter().enumerate() {
+            progress(&format!("fetching schema ({}/{total}): {schema_name}", i + 1));
             let table_names = self.query_tables_for_schema(&schema_name)?;
             let view_names = self.query_views_for_schema(&schema_name)?;
 

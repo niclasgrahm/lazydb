@@ -352,6 +352,7 @@ mod tests {
             "mydb".to_string(),
             Connection::DuckDb(DuckDbConnection {
                 path: "/tmp/test.duckdb".to_string(),
+                cache_schema: false,
             }),
         );
         let profiles = Profiles { connections };
@@ -373,6 +374,7 @@ mod tests {
                 warehouse: None,
                 schema: None,
                 role: None,
+                cache_schema: false,
             }),
         );
         connections.insert(
@@ -384,12 +386,14 @@ mod tests {
                 password: None,
                 database: "analytics".into(),
                 schema: None,
+                cache_schema: false,
             }),
         );
         connections.insert(
             "local".to_string(),
             Connection::DuckDb(DuckDbConnection {
                 path: "/tmp/test.duckdb".into(),
+                cache_schema: false,
             }),
         );
         connections.insert(
@@ -399,6 +403,7 @@ mod tests {
                 user: "default".into(),
                 password: None,
                 database: "default".into(),
+                cache_schema: false,
             }),
         );
 
@@ -425,11 +430,11 @@ mod tests {
         let mut connections = BTreeMap::new();
         connections.insert(
             "beta".to_string(),
-            Connection::DuckDb(DuckDbConnection { path: "x".into() }),
+            Connection::DuckDb(DuckDbConnection { path: "x".into(), cache_schema: false }),
         );
         connections.insert(
             "alpha".to_string(),
-            Connection::DuckDb(DuckDbConnection { path: "y".into() }),
+            Connection::DuckDb(DuckDbConnection { path: "y".into(), cache_schema: false }),
         );
         let profiles = Profiles { connections };
         assert_eq!(format_available_names(&profiles), "alpha, beta");
@@ -442,6 +447,7 @@ mod tests {
             "memdb".to_string(),
             Connection::DuckDb(DuckDbConnection {
                 path: ":memory:".to_string(),
+                cache_schema: false,
             }),
         );
         let profiles = Profiles { connections };
