@@ -64,7 +64,7 @@ fn main() -> Result<()> {
     let profiles = config::Profiles::load()?;
 
     let terminal = ratatui::init();
-    let result = run(terminal, app_config, profiles, files_root);
+    let result = run(terminal, app_config, profiles, files_root, cli.query);
     ratatui::restore();
     result
 }
@@ -74,8 +74,9 @@ fn run(
     app_config: config::AppConfig,
     profiles: config::Profiles,
     files_root: Option<std::path::PathBuf>,
+    initial_query: Option<String>,
 ) -> Result<()> {
-    let mut app = app::App::new(app_config, profiles, files_root);
+    let mut app = app::App::new(app_config, profiles, files_root, initial_query);
 
     while app.running {
         terminal.draw(|frame| ui::draw(&mut app, frame))?;

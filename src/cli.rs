@@ -16,6 +16,10 @@ pub struct Cli {
     /// Root directory for the files pane
     pub path: Option<PathBuf>,
 
+    /// Pre-populate the query editor with this SQL
+    #[arg(long)]
+    pub query: Option<String>,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }

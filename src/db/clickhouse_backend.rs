@@ -139,7 +139,14 @@ impl Database for ClickHouse {
         progress("fetching tables…");
         let table_names = self.query_string_list(&format!(
             "SELECT name FROM system.tables \
-             WHERE database = '{}' AND engine != 'View' \
+             WHERE database = '{}' AND engine NOT IN ('View', 'Distributed') \
+             ORDER BY name",
+            self.database
+        ))?;
+        progress("fetching distributed tables…");
+        let distributed_names = self.query_string_list(&format!(
+            "SELECT name FROM system.tables \
+             WHERE database = '{}' AND engine = 'Distributed' \
              ORDER BY name",
             self.database
         ))?;
@@ -159,6 +166,14 @@ impl Database for ClickHouse {
             })
             .collect();
 
+        let distributed: Vec<SchemaNode> = distributed_names
+            .into_iter()
+            .map(|name| {
+                let cols = self.query_columns(&name).unwrap_or_default();
+                SchemaNode::group(name, cols)
+            })
+            .collect();
+
         let views: Vec<SchemaNode> = view_names
             .into_iter()
             .map(|name| {
@@ -170,6 +185,9 @@ impl Database for ClickHouse {
         let mut children = Vec::new();
         if !tables.is_empty() {
             children.push(SchemaNode::group("Tables", tables));
+        }
+        if !distributed.is_empty() {
+            children.push(SchemaNode::group("Distributed Tables", distributed));
         }
         if !views.is_empty() {
             children.push(SchemaNode::group("Views", views));

@@ -70,13 +70,17 @@ local function setup_autocommands(buf)
   })
 end
 
-local function spawn()
+local function spawn(query)
   local buf = vim.api.nvim_create_buf(false, true)
   state.buf = buf
 
   state.win = create_float(buf)
 
-  vim.fn.termopen(config.options.lazydb_command, {
+  local cmd = query
+    and { config.options.lazydb_command, "--query", query }
+    or config.options.lazydb_command
+
+  vim.fn.termopen(cmd, {
     on_exit = function()
       vim.schedule(function()
         if state.augroup then
@@ -114,6 +118,11 @@ function M.open()
   end
 
   spawn()
+end
+
+function M.open_with_query(query)
+  M.kill()
+  spawn(query)
 end
 
 function M.hide()

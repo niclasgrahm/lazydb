@@ -173,7 +173,7 @@ pub struct App<'a> {
 }
 
 impl<'a> App<'a> {
-    pub fn new(config: AppConfig, profiles: Profiles, files_root: Option<PathBuf>) -> Self {
+    pub fn new(config: AppConfig, profiles: Profiles, files_root: Option<PathBuf>, initial_query: Option<String>) -> Self {
         let (sidebar_items, label_to_profile) = build_sidebar_tree(&profiles);
 
         let mut state = ListState::default();
@@ -194,7 +194,11 @@ impl<'a> App<'a> {
             file_tree_state.select(Some(0));
         }
 
-        let mut editor = TextArea::default();
+        let mut editor = if let Some(query) = initial_query {
+            TextArea::new(query.lines().map(String::from).collect())
+        } else {
+            TextArea::default()
+        };
         editor.set_cursor_line_style(Style::default());
         editor.set_placeholder_text("Press Tab to switch here and start typing SQL...");
         editor.set_placeholder_style(Style::default().fg(Color::DarkGray));
@@ -1483,7 +1487,7 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     fn test_app() -> App<'static> {
-        App::new(AppConfig::default(), Profiles::default(), None)
+        App::new(AppConfig::default(), Profiles::default(), None, None)
     }
 
     fn test_profiles() -> Profiles {
@@ -1531,7 +1535,7 @@ mod tests {
 
     #[test]
     fn new_with_profiles() {
-        let app = App::new(AppConfig::default(), test_profiles(), None);
+        let app = App::new(AppConfig::default(), test_profiles(), None, None);
         assert_eq!(app.sidebar_items.len(), 2);
         assert_eq!(app.sidebar_state.selected(), Some(0));
     }
@@ -1551,7 +1555,7 @@ mod tests {
 
     #[test]
     fn tab_cycles_focus() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.results_visible = true;
 
         assert_eq!(app.focus, Focus::Sidebar);
@@ -1571,7 +1575,7 @@ mod tests {
 
     #[test]
     fn tab_skips_results_when_hidden() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.results_visible = false;
         app.focus = Focus::QueryEditor;
 
@@ -1582,7 +1586,7 @@ mod tests {
 
     #[test]
     fn shift_tab_cycles_reverse() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.results_visible = true;
         app.focus = Focus::Sidebar;
 
@@ -1595,7 +1599,7 @@ mod tests {
 
     #[test]
     fn sidebar_navigate_down() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         assert_eq!(app.sidebar_state.selected(), Some(0));
         app.handle_sidebar_key(&key(KeyCode::Char('j')));
         assert_eq!(app.sidebar_state.selected(), Some(1));
@@ -1603,7 +1607,7 @@ mod tests {
 
     #[test]
     fn sidebar_navigate_up() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.sidebar_state.select(Some(1));
         app.handle_sidebar_key(&key(KeyCode::Char('k')));
         assert_eq!(app.sidebar_state.selected(), Some(0));
@@ -1611,7 +1615,7 @@ mod tests {
 
     #[test]
     fn sidebar_navigate_down_at_bottom() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.sidebar_state.select(Some(1)); // last item (2 profiles)
         app.handle_sidebar_key(&key(KeyCode::Char('j')));
         assert_eq!(app.sidebar_state.selected(), Some(1)); // unchanged
@@ -1619,7 +1623,7 @@ mod tests {
 
     #[test]
     fn sidebar_navigate_up_at_top() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         assert_eq!(app.sidebar_state.selected(), Some(0));
         app.handle_sidebar_key(&key(KeyCode::Char('k')));
         assert_eq!(app.sidebar_state.selected(), Some(0)); // unchanged
@@ -1627,7 +1631,7 @@ mod tests {
 
     #[test]
     fn sidebar_q_does_not_quit() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         assert!(app.running);
         app.handle_sidebar_key(&key(KeyCode::Char('q')));
         assert!(app.running);
@@ -1635,7 +1639,7 @@ mod tests {
 
     #[test]
     fn sidebar_slash_starts_filter() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         assert!(!app.sidebar_filtering);
         app.handle_sidebar_key(&key(KeyCode::Char('/')));
         assert!(app.sidebar_filtering);
@@ -1646,7 +1650,7 @@ mod tests {
 
     #[test]
     fn filter_char_appends() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.sidebar_filtering = true;
         app.handle_sidebar_filter_key(&key(KeyCode::Char('t')));
         assert_eq!(app.sidebar_filter, "t");
@@ -1656,7 +1660,7 @@ mod tests {
 
     #[test]
     fn filter_backspace_pops() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.sidebar_filtering = true;
         app.sidebar_filter = "te".into();
         app.handle_sidebar_filter_key(&key(KeyCode::Backspace));
@@ -1665,7 +1669,7 @@ mod tests {
 
     #[test]
     fn filter_backspace_on_empty_exits() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.sidebar_filtering = true;
         app.sidebar_filter = "x".into();
         app.handle_sidebar_filter_key(&key(KeyCode::Backspace));
@@ -1676,7 +1680,7 @@ mod tests {
 
     #[test]
     fn filter_esc_clears_and_exits() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.sidebar_filtering = true;
         app.sidebar_filter = "test".into();
         app.handle_sidebar_filter_key(&key(KeyCode::Esc));
@@ -1686,7 +1690,7 @@ mod tests {
 
     #[test]
     fn filter_enter_keeps_filter_exits_mode() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.sidebar_filtering = true;
         app.sidebar_filter = "pg".into();
         app.handle_sidebar_filter_key(&key(KeyCode::Enter));
@@ -1697,7 +1701,7 @@ mod tests {
     // --- Files filter key handling ---
 
     fn app_with_file_tree() -> App<'static> {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.file_tree = vec![
             TreeNode::folder("src", vec![
                 TreeNode::leaf("main.sql"),
@@ -1784,7 +1788,7 @@ mod tests {
 
     #[test]
     fn results_scroll_down() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.query_result = Some(QueryResult {
             columns: vec!["id".into()],
             rows: (0..20).map(|i| vec![db::Value::Int(i)]).collect(),
@@ -1796,7 +1800,7 @@ mod tests {
 
     #[test]
     fn results_scroll_down_at_bottom() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.query_result = Some(QueryResult {
             columns: vec!["id".into()],
             rows: (0..5).map(|i| vec![db::Value::Int(i)]).collect(),
@@ -1808,7 +1812,7 @@ mod tests {
 
     #[test]
     fn results_scroll_up() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.results_scroll_row = 3;
         app.handle_results_key(&key(KeyCode::Char('k')));
         assert_eq!(app.results_scroll_row, 2);
@@ -1816,7 +1820,7 @@ mod tests {
 
     #[test]
     fn results_scroll_up_at_zero() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.results_scroll_row = 0;
         app.handle_results_key(&key(KeyCode::Char('k')));
         assert_eq!(app.results_scroll_row, 0);
@@ -1824,7 +1828,7 @@ mod tests {
 
     #[test]
     fn results_close() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.results_visible = true;
         app.focus = Focus::Results;
         app.handle_results_key(&key(KeyCode::Char('c')));
@@ -1834,7 +1838,7 @@ mod tests {
 
     #[test]
     fn results_q_does_not_quit() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::Results;
         app.handle_results_key(&key(KeyCode::Char('q')));
         assert!(app.running);
@@ -1844,7 +1848,7 @@ mod tests {
 
     #[test]
     fn next_page_noop_when_no_more() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.results_has_more = false;
         app.results_page = 0;
         app.results_next_page();
@@ -1853,7 +1857,7 @@ mod tests {
 
     #[test]
     fn prev_page_noop_at_zero() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.results_page = 0;
         app.results_prev_page();
         assert_eq!(app.results_page, 0);
@@ -1863,7 +1867,7 @@ mod tests {
 
     #[test]
     fn populate_schema_adds_children() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         let label = &app.sidebar_items[0].label.clone();
         let schema = vec![
             SchemaNode::group("Tables", vec![
@@ -1879,7 +1883,7 @@ mod tests {
 
     #[test]
     fn clear_schema_removes_children() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         let label = app.sidebar_items[0].label.clone();
         let schema = vec![SchemaNode::leaf("Tables")];
         app.populate_schema(&label, schema);
@@ -1892,7 +1896,7 @@ mod tests {
 
     #[test]
     fn poll_connected_success() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         let label = app.sidebar_items[0].label.clone();
 
         let (tx, rx) = mpsc::channel();
@@ -1916,7 +1920,7 @@ mod tests {
 
     #[test]
     fn poll_connected_failure() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         let label = app.sidebar_items[0].label.clone();
 
         let (tx, rx) = mpsc::channel();
@@ -1935,7 +1939,7 @@ mod tests {
 
     #[test]
     fn poll_query_success() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         let (tx, rx) = mpsc::channel();
         app.set_bg_receiver(rx);
 
@@ -1958,7 +1962,7 @@ mod tests {
 
     #[test]
     fn poll_disconnected_channel() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         let (tx, rx) = mpsc::channel();
         app.set_bg_receiver(rx);
         drop(tx); // disconnect the channel
@@ -1991,7 +1995,7 @@ mod tests {
 
     #[test]
     fn leader_key_activates() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         assert!(!app.leader_active);
         // Space is the default leader key, sidebar is default focus (normal context)
         app.handle_leader_key_press();
@@ -2000,7 +2004,7 @@ mod tests {
 
     #[test]
     fn leader_actions_query_editor() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::QueryEditor;
         let actions = app.leader_actions();
         assert!(actions.iter().any(|a| a.key == 'e'), "execute");
@@ -2019,19 +2023,19 @@ mod tests {
 
     #[test]
     fn query_language_default_is_sql() {
-        let app = App::new(AppConfig::default(), test_profiles(), None);
+        let app = App::new(AppConfig::default(), test_profiles(), None, None);
         assert_eq!(app.query_language, QueryLanguage::Sql);
     }
 
     #[test]
     fn sql_preview_hidden_by_default() {
-        let app = App::new(AppConfig::default(), test_profiles(), None);
+        let app = App::new(AppConfig::default(), test_profiles(), None, None);
         assert!(!app.show_sql_preview);
     }
 
     #[test]
     fn switching_to_prql_shows_preview() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::QueryEditor;
         app.handle_leader_action(&key(KeyCode::Char('l')));
         assert_eq!(app.query_language, QueryLanguage::Prql);
@@ -2040,7 +2044,7 @@ mod tests {
 
     #[test]
     fn switching_back_to_sql_hides_preview() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::QueryEditor;
         app.handle_leader_action(&key(KeyCode::Char('l'))); // → PRQL
         app.handle_leader_action(&key(KeyCode::Char('l'))); // → SQL
@@ -2050,7 +2054,7 @@ mod tests {
 
     #[test]
     fn toggle_preview_keybind() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::QueryEditor;
         assert!(!app.show_sql_preview);
         app.handle_leader_action(&key(KeyCode::Char('p')));
@@ -2061,14 +2065,14 @@ mod tests {
 
     #[test]
     fn sql_preview_returns_source_for_sql() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.editor.insert_str("SELECT 1");
         assert_eq!(app.sql_preview(), "SELECT 1");
     }
 
     #[test]
     fn sql_preview_transpiles_prql() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::QueryEditor;
         app.handle_leader_action(&key(KeyCode::Char('l'))); // → PRQL
         app.editor.insert_str("from employees | select {name}");
@@ -2079,7 +2083,7 @@ mod tests {
 
     #[test]
     fn sql_preview_shows_error_for_invalid_prql() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::QueryEditor;
         app.handle_leader_action(&key(KeyCode::Char('l'))); // → PRQL
         app.editor.insert_str("this is not valid prql !!!");
@@ -2089,7 +2093,7 @@ mod tests {
 
     #[test]
     fn leader_action_l_cycles_language() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::QueryEditor;
         assert_eq!(app.query_language, QueryLanguage::Sql);
         app.handle_leader_action(&key(KeyCode::Char('l')));
@@ -2100,7 +2104,7 @@ mod tests {
 
     #[test]
     fn switch_language_not_available_outside_query_editor() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::Sidebar;
         let actions = app.leader_actions();
         assert!(!actions.iter().any(|a| a.key == 'l'), "no switch language in sidebar");
@@ -2109,7 +2113,7 @@ mod tests {
 
     #[test]
     fn leader_actions_sidebar_on_connection() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::Sidebar;
         // Default selection is index 0, which is a connection node (depth 0)
         let actions = app.leader_actions();
@@ -2121,7 +2125,7 @@ mod tests {
 
     #[test]
     fn leader_actions_sidebar_on_table() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::Sidebar;
         // Populate schema so we have table nodes
         let label = app.sidebar_items[0].label.clone();
@@ -2145,7 +2149,7 @@ mod tests {
     fn leader_s_with_filter_shows_table_when_parent_collapsed() {
         // Regression: when a filter force-expands a collapsed Tables folder to show
         // a matching table, leader+s must still insert the preview query.
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::Sidebar;
         let label = app.sidebar_items[0].label.clone();
         app.populate_schema(&label, vec![
@@ -2180,7 +2184,7 @@ mod tests {
 
     #[test]
     fn leader_actions_sidebar_on_folder() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::Sidebar;
         let label = app.sidebar_items[0].label.clone();
         app.populate_schema(&label, vec![
@@ -2200,7 +2204,7 @@ mod tests {
 
     #[test]
     fn leader_actions_sidebar_disconnect_when_connected() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::Sidebar;
         app.connected_db = Some(app.sidebar_items[0].label.clone());
         let actions = app.leader_actions();
@@ -2210,7 +2214,7 @@ mod tests {
 
     #[test]
     fn leader_actions_results() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::Results;
         let actions = app.leader_actions();
         assert!(actions.iter().any(|a| a.key == 'c'), "close");
@@ -2221,7 +2225,7 @@ mod tests {
 
     #[test]
     fn leader_action_format() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::QueryEditor;
         app.editor.insert_str("select * from foo");
         app.handle_leader_action(&key(KeyCode::Char('f')));
@@ -2231,14 +2235,14 @@ mod tests {
 
     #[test]
     fn leader_action_help() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.handle_leader_action(&key(KeyCode::Char('h')));
         assert!(app.show_help);
     }
 
     #[test]
     fn leader_action_quit() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         assert!(app.running);
         app.handle_leader_action(&key(KeyCode::Char('q')));
         assert!(!app.running);
@@ -2246,7 +2250,7 @@ mod tests {
 
     #[test]
     fn leader_q_quits_from_sidebar() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::Sidebar;
         assert!(app.running);
         app.leader_active = true;
@@ -2256,7 +2260,7 @@ mod tests {
 
     #[test]
     fn leader_q_quits_from_results() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::Results;
         assert!(app.running);
         app.leader_active = true;
@@ -2267,7 +2271,7 @@ mod tests {
     #[test]
     fn leader_actions_include_quit_always() {
         for focus in [Focus::Sidebar, Focus::QueryEditor, Focus::Results] {
-            let mut app = App::new(AppConfig::default(), test_profiles(), None);
+            let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
             app.focus = focus;
             let actions = app.leader_actions();
             assert!(
@@ -2279,7 +2283,7 @@ mod tests {
 
     #[test]
     fn leader_action_close_results() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::Results;
         app.results_visible = true;
         app.handle_leader_action(&key(KeyCode::Char('c')));
@@ -2289,7 +2293,7 @@ mod tests {
 
     #[test]
     fn leader_ignores_invalid_action_for_context() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::Sidebar;
         // 'f' (format) is not available in sidebar context
         app.handle_leader_action(&key(KeyCode::Char('f')));
@@ -2300,7 +2304,7 @@ mod tests {
 
     #[test]
     fn leader_not_active_in_insert_mode() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::QueryEditor;
         app.vim = Vim::new(vim::Mode::Insert);
         app.handle_leader_key_press();
@@ -2369,7 +2373,7 @@ mod tests {
 
     #[test]
     fn toggle_sidebar_hides_and_shows() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         assert!(app.show_sidebar);
         app.toggle_pane_visibility(Focus::Sidebar);
         assert!(!app.show_sidebar);
@@ -2379,7 +2383,7 @@ mod tests {
 
     #[test]
     fn toggle_files_hides_and_shows() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         assert!(!app.show_files);
         app.toggle_pane_visibility(Focus::Files);
         assert!(app.show_files);
@@ -2389,7 +2393,7 @@ mod tests {
 
     #[test]
     fn toggle_recent_hides_and_shows() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         assert!(!app.show_recent);
         app.toggle_pane_visibility(Focus::Recent);
         assert!(app.show_recent);
@@ -2399,7 +2403,7 @@ mod tests {
 
     #[test]
     fn toggle_focused_pane_moves_focus_to_editor() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::Sidebar;
         app.toggle_pane_visibility(Focus::Sidebar);
         assert_eq!(app.focus, Focus::QueryEditor);
@@ -2407,7 +2411,7 @@ mod tests {
 
     #[test]
     fn toggle_on_moves_focus_to_pane() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.show_files = false;
         app.focus = Focus::QueryEditor;
         app.toggle_pane_visibility(Focus::Files);
@@ -2416,7 +2420,7 @@ mod tests {
 
     #[test]
     fn toggle_noop_for_query_editor() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::QueryEditor;
         // QueryEditor is not toggleable
         app.toggle_pane_visibility(Focus::QueryEditor);
@@ -2427,7 +2431,7 @@ mod tests {
 
     #[test]
     fn focus_cycles_through_all_visible_panes() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.show_sidebar = true;
         app.show_files = true;
         app.show_recent = true;
@@ -2449,7 +2453,7 @@ mod tests {
 
     #[test]
     fn focus_skips_hidden_panes() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.show_sidebar = false;
         app.show_files = false;
         app.show_recent = false;
@@ -2463,7 +2467,7 @@ mod tests {
 
     #[test]
     fn focus_reverse_with_all_panes() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.show_sidebar = true;
         app.show_files = true;
         app.show_recent = true;
@@ -2485,7 +2489,7 @@ mod tests {
 
     #[test]
     fn visible_panes_default() {
-        let app = App::new(AppConfig::default(), test_profiles(), None);
+        let app = App::new(AppConfig::default(), test_profiles(), None, None);
         // Default: sidebar + query editor
         let panes = app.visible_panes();
         assert_eq!(panes, vec![Focus::Sidebar, Focus::QueryEditor]);
@@ -2493,7 +2497,7 @@ mod tests {
 
     #[test]
     fn visible_panes_all() {
-        let mut app = App::new(AppConfig::default(), test_profiles(), None);
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.show_sidebar = true;
         app.show_files = true;
         app.show_recent = true;
@@ -2638,7 +2642,7 @@ mod files_tests {
     use tempfile::tempdir;
 
     fn app_with_files(root: std::path::PathBuf) -> App<'static> {
-        App::new(AppConfig::default(), Profiles::default(), Some(root))
+        App::new(AppConfig::default(), Profiles::default(), Some(root), None)
     }
 
     #[test]
@@ -2653,7 +2657,7 @@ mod files_tests {
 
     #[test]
     fn new_without_path_hides_files() {
-        let app = App::new(AppConfig::default(), Profiles::default(), None);
+        let app = App::new(AppConfig::default(), Profiles::default(), None, None);
         assert!(!app.show_files);
         assert!(app.file_tree.is_empty());
     }
