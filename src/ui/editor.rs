@@ -6,11 +6,11 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
-use crate::app::{App, Focus};
+use crate::app::{App, EditorViewport, Focus};
 use crate::highlight;
 use crate::vim;
 
-pub fn draw(app: &App, frame: &mut Frame, area: Rect) {
+pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
     let focused = app.focus == Focus::QueryEditor;
     let border_style = if focused {
         Style::default().fg(Color::Cyan)
@@ -55,6 +55,9 @@ pub fn draw(app: &App, frame: &mut Frame, area: Rect) {
     } else {
         0
     };
+
+    // Record viewport for the completion popup.
+    app.editor_viewport = Some(EditorViewport { inner, scroll_row });
 
     // Build highlighted lines
     let visible_lines: Vec<Line> = lines

@@ -1,3 +1,4 @@
+mod completion_popup;
 mod editor;
 mod files;
 mod help;
@@ -112,4 +113,5 @@ pub fn draw(app: &mut App, frame: &mut Frame) {
     help::draw(app, frame);
     leader::draw(app, frame);
     loading::draw(app, frame);
+    completion_popup::draw(app, frame);
 }

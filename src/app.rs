@@ -14,6 +14,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use crate::completion::CompletionState;
 use crate::config::{AppConfig, Connection, Profiles};
 use crate::db::{self, Database, ProgressFn, QueryResult, SchemaNode};
 use crate::schema_cache;
@@ -170,6 +171,19 @@ pub struct App<'a> {
     pub file_paths: Vec<PathBuf>,
     pub query_language: QueryLanguage,
     pub show_sql_preview: bool,
+    /// Raw cached schema per connection label. Populated whenever
+    /// `populate_schema` runs. Used by the inline completion popup.
+    pub schema_raw: BTreeMap<String, Vec<SchemaNode>>,
+    /// Active completion popup state for the query editor, if any.
+    pub completion: Option<CompletionState>,
+    /// Editor viewport recorded each frame so the popup can position itself.
+    pub editor_viewport: Option<EditorViewport>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct EditorViewport {
+    pub inner: Rect,
+    pub scroll_row: usize,
 }
 
 impl<'a> App<'a> {
@@ -248,6 +262,9 @@ impl<'a> App<'a> {
             file_paths,
             query_language: QueryLanguage::default(),
             show_sql_preview: QueryLanguage::default().preview_by_default(),
+            schema_raw: BTreeMap::new(),
+            completion: None,
+            editor_viewport: None,
         }
     }
 
@@ -512,6 +529,11 @@ impl<'a> App<'a> {
 
             match self.focus {
                 Focus::QueryEditor => {
+                    // If a completion popup is open, intercept navigation
+                    // keys before forwarding to vim/textarea.
+                    if self.completion.is_some() && self.handle_completion_key(key) {
+                        return Ok(());
+                    }
                     let input: Input = event.into();
                     match self.vim.transition(input, &mut self.editor) {
                         Transition::Mode(mode) if self.vim.mode != mode => {
@@ -521,6 +543,13 @@ impl<'a> App<'a> {
                         Transition::Pending(input) => {
                             self.vim = Vim::new(self.vim.mode).with_pending(input);
                         }
+                    }
+                    // After the keystroke is applied, refresh the popup if
+                    // we're still in Insert mode; otherwise clear it.
+                    if self.vim.mode == vim::Mode::Insert {
+                        self.recompute_completion();
+                    } else {
+                        self.completion = None;
                     }
                 }
                 Focus::Sidebar if self.sidebar_filtering => self.handle_sidebar_filter_key(key),
@@ -1394,20 +1423,21 @@ impl<'a> App<'a> {
     }
 
     fn populate_schema(&mut self, connection_label: &str, schema_nodes: Vec<SchemaNode>) {
-        fn to_tree(node: SchemaNode) -> TreeNode {
+        fn to_tree(node: &SchemaNode) -> TreeNode {
             if node.children.is_empty() {
                 TreeNode::leaf(&node.label)
             } else {
-                TreeNode::folder(&node.label, node.children.into_iter().map(to_tree).collect())
+                TreeNode::folder(&node.label, node.children.iter().map(to_tree).collect())
             }
         }
 
         for node in self.sidebar_items.iter_mut() {
             if node.label == connection_label {
-                node.children = schema_nodes.into_iter().map(to_tree).collect();
+                node.children = schema_nodes.iter().map(to_tree).collect();
                 break;
             }
         }
+        self.schema_raw.insert(connection_label.to_string(), schema_nodes);
     }
 
     fn clear_schema(&mut self, connection_label: &str) {
@@ -1417,6 +1447,106 @@ impl<'a> App<'a> {
                 break;
             }
         }
+        self.schema_raw.remove(connection_label);
+    }
+
+    fn active_schema(&self) -> Option<&[SchemaNode]> {
+        let label = self.connected_db.as_deref()?;
+        self.schema_raw.get(label).map(|v| v.as_slice())
+    }
+
+    /// Recompute the completion popup state from the current editor buffer.
+    /// Silently no-ops when there is no cached schema for the active connection.
+    fn recompute_completion(&mut self) {
+        let Some(schema) = self.active_schema() else {
+            self.completion = None;
+            return;
+        };
+        let buf = self.editor.lines().join("\n");
+        let cursor = self.editor.cursor();
+        match crate::completion::detect_context(&buf, cursor) {
+            Some(ctx) => {
+                let suggestions = crate::completion::compute_suggestions(schema, &ctx);
+                if suggestions.is_empty() {
+                    self.completion = None;
+                } else {
+                    let selected = self
+                        .completion
+                        .as_ref()
+                        .map(|c| c.selected.min(suggestions.len() - 1))
+                        .unwrap_or(0);
+                    self.completion = Some(CompletionState {
+                        suggestions,
+                        selected,
+                        ctx,
+                    });
+                }
+            }
+            None => self.completion = None,
+        }
+    }
+
+    /// If a completion popup is active, intercept Esc / Tab / Enter / Up /
+    /// Down / Ctrl-N / Ctrl-P and act on the popup. Returns true if the key
+    /// was handled (caller should not forward to vim/textarea).
+    fn handle_completion_key(&mut self, key: &crossterm::event::KeyEvent) -> bool {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let Some(state) = self.completion.as_mut() else {
+            return false;
+        };
+        match (key.code, key.modifiers) {
+            (KeyCode::Esc, _) => {
+                self.completion = None;
+                true
+            }
+            (KeyCode::Up, _) => {
+                if state.selected > 0 {
+                    state.selected -= 1;
+                }
+                true
+            }
+            (KeyCode::Down, _) => {
+                if state.selected + 1 < state.suggestions.len() {
+                    state.selected += 1;
+                }
+                true
+            }
+            (KeyCode::Char('p'), m) if m.contains(KeyModifiers::CONTROL) => {
+                if state.selected > 0 {
+                    state.selected -= 1;
+                }
+                true
+            }
+            (KeyCode::Char('n'), m) if m.contains(KeyModifiers::CONTROL) => {
+                if state.selected + 1 < state.suggestions.len() {
+                    state.selected += 1;
+                }
+                true
+            }
+            (KeyCode::Tab, _) | (KeyCode::Enter, _) => {
+                self.accept_completion();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn accept_completion(&mut self) {
+        use tui_textarea::CursorMove;
+        let Some(state) = self.completion.take() else {
+            return;
+        };
+        let pick = state.suggestions[state.selected].clone();
+        let ctx = &state.ctx;
+        self.editor.move_cursor(CursorMove::Jump(
+            ctx.replace_row as u16,
+            ctx.replace_col_start as u16,
+        ));
+        let span = ctx.replace_col_end - ctx.replace_col_start;
+        for _ in 0..span {
+            self.editor.delete_next_char();
+        }
+        self.editor.insert_str(&pick);
     }
 }
 
