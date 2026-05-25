@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use color_eyre::eyre::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::db::clickhouse_backend::ClickHouse;
 use crate::db::databricks_backend::Databricks;
@@ -69,13 +69,13 @@ impl AppConfig {
 
 // --- Connection profiles (~/.config/lazydb/profiles.toml) ---
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Profiles {
     #[serde(default)]
     pub connections: BTreeMap<String, Connection>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum Connection {
     #[serde(rename = "duckdb")]
@@ -90,26 +90,30 @@ pub enum Connection {
     Databricks(DatabricksConnection),
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DuckDbConnection {
     pub path: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub cache_schema: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PostgresConnection {
     pub host: String,
     #[serde(default = "default_pg_port")]
     pub port: u16,
     pub user: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
     pub database: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub cache_schema: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 fn default_pg_port() -> u16 {
@@ -133,17 +137,17 @@ impl PostgresConnection {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ClickHouseConnection {
     #[serde(default = "default_clickhouse_url")]
     pub url: String,
     #[serde(default = "default_clickhouse_user")]
     pub user: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
     #[serde(default = "default_clickhouse_database")]
     pub database: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub cache_schema: bool,
 }
 
@@ -159,7 +163,7 @@ fn default_clickhouse_database() -> String {
     "default".to_string()
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "auth")]
 pub enum SnowflakeAuth {
     #[serde(rename = "password")]
@@ -170,32 +174,32 @@ pub enum SnowflakeAuth {
     Browser { user: String },
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SnowflakeConnection {
     pub account: String,
     #[serde(flatten)]
     pub auth: SnowflakeAuth,
     pub database: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warehouse: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub cache_schema: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DatabricksConnection {
     pub host: String,
     pub token: String,
     pub warehouse_id: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catalog: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub cache_schema: bool,
 }
 
@@ -297,6 +301,41 @@ impl Profiles {
             toml::from_str(&content).wrap_err_with(|| format!("Failed to parse {}", path.display()))?;
         Ok(profiles)
     }
+
+    pub fn save(&self) -> Result<PathBuf> {
+        let path = config_dir().join("profiles.toml");
+        self.save_to(&path)?;
+        Ok(path)
+    }
+
+    pub fn save_to(&self, path: &std::path::Path) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .wrap_err_with(|| format!("Failed to create {}", parent.display()))?;
+        }
+        let content = toml::to_string_pretty(self)
+            .wrap_err("Failed to serialize profiles")?;
+        let tmp = path.with_extension("toml.tmp");
+        fs::write(&tmp, &content)
+            .wrap_err_with(|| format!("Failed to write {}", tmp.display()))?;
+        fs::rename(&tmp, path)
+            .wrap_err_with(|| format!("Failed to rename {} -> {}", tmp.display(), path.display()))?;
+        Ok(())
+    }
+}
+
+pub fn validate_new_name(profiles: &Profiles, name: &str) -> std::result::Result<(), String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("Name cannot be empty".into());
+    }
+    if trimmed != name {
+        return Err("Name cannot have leading or trailing whitespace".into());
+    }
+    if profiles.connections.contains_key(name) {
+        return Err(format!("Connection '{name}' already exists"));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -647,6 +686,214 @@ mod tests {
                 "for body: {body}"
             );
         }
+    }
+
+    // --- save / round-trip tests ---
+
+    fn round_trip(conn: Connection) -> Connection {
+        let mut profiles = Profiles::default();
+        profiles.connections.insert("c".to_string(), conn);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        profiles.save_to(&path).unwrap();
+        let content = fs::read_to_string(&path).unwrap();
+        let parsed: Profiles = toml::from_str(&content).unwrap();
+        parsed.connections.into_iter().next().unwrap().1
+    }
+
+    #[test]
+    fn save_round_trip_duckdb() {
+        let c = round_trip(Connection::DuckDb(DuckDbConnection {
+            path: "/tmp/x.db".into(),
+            cache_schema: true,
+        }));
+        match c {
+            Connection::DuckDb(d) => {
+                assert_eq!(d.path, "/tmp/x.db");
+                assert!(d.cache_schema);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn save_round_trip_postgres_with_optionals() {
+        let c = round_trip(Connection::Postgres(PostgresConnection {
+            host: "h".into(),
+            port: 5433,
+            user: "u".into(),
+            password: Some("pw".into()),
+            database: "d".into(),
+            schema: Some("s".into()),
+            cache_schema: false,
+        }));
+        match c {
+            Connection::Postgres(p) => {
+                assert_eq!(p.port, 5433);
+                assert_eq!(p.password.as_deref(), Some("pw"));
+                assert_eq!(p.schema.as_deref(), Some("s"));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn save_omits_none_options() {
+        let mut profiles = Profiles::default();
+        profiles.connections.insert(
+            "c".into(),
+            Connection::Postgres(PostgresConnection {
+                host: "h".into(),
+                port: 5432,
+                user: "u".into(),
+                password: None,
+                database: "d".into(),
+                schema: None,
+                cache_schema: false,
+            }),
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        profiles.save_to(&path).unwrap();
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(!content.contains("password"));
+        assert!(!content.contains("schema"));
+        assert!(!content.contains("cache_schema"));
+    }
+
+    #[test]
+    fn save_round_trip_snowflake_password() {
+        let c = round_trip(Connection::Snowflake(SnowflakeConnection {
+            account: "xy".into(),
+            auth: SnowflakeAuth::Password {
+                user: "u".into(),
+                password: "pw".into(),
+            },
+            database: "D".into(),
+            warehouse: Some("W".into()),
+            schema: None,
+            role: None,
+            cache_schema: false,
+        }));
+        match c {
+            Connection::Snowflake(s) => {
+                assert!(matches!(s.auth, SnowflakeAuth::Password { user, password }
+                    if user == "u" && password == "pw"));
+                assert_eq!(s.warehouse.as_deref(), Some("W"));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn save_round_trip_snowflake_browser() {
+        let c = round_trip(Connection::Snowflake(SnowflakeConnection {
+            account: "xy".into(),
+            auth: SnowflakeAuth::Browser { user: "u@e.com".into() },
+            database: "D".into(),
+            warehouse: None,
+            schema: None,
+            role: None,
+            cache_schema: false,
+        }));
+        match c {
+            Connection::Snowflake(s) => {
+                assert!(matches!(s.auth, SnowflakeAuth::Browser { user } if user == "u@e.com"));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn save_round_trip_clickhouse_and_databricks() {
+        let c = round_trip(Connection::ClickHouse(ClickHouseConnection {
+            url: "http://x:8123".into(),
+            user: "default".into(),
+            password: Some("p".into()),
+            database: "d".into(),
+            cache_schema: true,
+        }));
+        match c {
+            Connection::ClickHouse(ch) => {
+                assert_eq!(ch.url, "http://x:8123");
+                assert_eq!(ch.password.as_deref(), Some("p"));
+                assert!(ch.cache_schema);
+            }
+            _ => panic!("wrong variant"),
+        }
+
+        let c = round_trip(Connection::Databricks(DatabricksConnection {
+            host: "h".into(),
+            token: "t".into(),
+            warehouse_id: "w".into(),
+            catalog: Some("c".into()),
+            schema: None,
+            cache_schema: false,
+        }));
+        match c {
+            Connection::Databricks(d) => {
+                assert_eq!(d.host, "h");
+                assert_eq!(d.catalog.as_deref(), Some("c"));
+                assert_eq!(d.schema, None);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn save_atomically_overwrites_existing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        fs::write(&path, "garbage").unwrap();
+
+        let mut profiles = Profiles::default();
+        profiles.connections.insert(
+            "c".into(),
+            Connection::DuckDb(DuckDbConnection {
+                path: "x".into(),
+                cache_schema: false,
+            }),
+        );
+        profiles.save_to(&path).unwrap();
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("duckdb"));
+        assert!(!content.contains("garbage"));
+    }
+
+    // --- validate_new_name tests ---
+
+    #[test]
+    fn validate_new_name_accepts_fresh() {
+        let profiles = Profiles::default();
+        assert!(validate_new_name(&profiles, "fresh").is_ok());
+    }
+
+    #[test]
+    fn validate_new_name_rejects_empty() {
+        let profiles = Profiles::default();
+        assert!(validate_new_name(&profiles, "").is_err());
+        assert!(validate_new_name(&profiles, "   ").is_err());
+    }
+
+    #[test]
+    fn validate_new_name_rejects_whitespace_padding() {
+        let profiles = Profiles::default();
+        assert!(validate_new_name(&profiles, " foo").is_err());
+        assert!(validate_new_name(&profiles, "foo ").is_err());
+    }
+
+    #[test]
+    fn validate_new_name_rejects_duplicate() {
+        let mut profiles = Profiles::default();
+        profiles.connections.insert(
+            "dup".into(),
+            Connection::DuckDb(DuckDbConnection {
+                path: "x".into(),
+                cache_schema: false,
+            }),
+        );
+        let err = validate_new_name(&profiles, "dup").unwrap_err();
+        assert!(err.contains("dup"));
     }
 
     #[test]

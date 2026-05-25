@@ -5,8 +5,13 @@ use clap::{Parser, Subcommand, ValueEnum};
 use color_eyre::eyre::{Context, bail};
 use color_eyre::Result;
 
-use crate::config::Profiles;
+use crate::config::{
+    ClickHouseConnection, Connection, DatabricksConnection, DuckDbConnection, PostgresConnection,
+    Profiles, SnowflakeAuth, SnowflakeConnection, validate_new_name,
+};
 use crate::db::QueryResult;
+
+use dialoguer::{Confirm, Input, Password, Select};
 
 const DEFAULT_LIMIT: usize = 1000;
 
@@ -66,6 +71,8 @@ pub enum ConnsAction {
         /// Connection name from profiles.toml
         name: String,
     },
+    /// Create a new connection interactively
+    New,
 }
 
 pub fn handle(cmd: Command) -> Result<()> {
@@ -73,6 +80,7 @@ pub fn handle(cmd: Command) -> Result<()> {
         Command::Conns { action } => match action {
             ConnsAction::List => conns_list(),
             ConnsAction::Test { name } => conns_test(&name),
+            ConnsAction::New => conns_new(),
         },
         Command::Query {
             conn,
@@ -120,6 +128,206 @@ fn conns_test(name: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn conns_new() -> Result<()> {
+    let mut profiles = Profiles::load()?;
+
+    let name = prompt_unique_name(&profiles)?;
+    let conn = prompt_connection()?;
+
+    let test_now = Confirm::new()
+        .with_prompt("Test connection now?")
+        .default(true)
+        .interact()?;
+    if test_now {
+        println!("Testing connection ({})...", conn.type_name());
+        let start = Instant::now();
+        match conn.connect() {
+            Ok(_) => println!("OK ({:.0?})", start.elapsed()),
+            Err(e) => println!("FAILED: {e}"),
+        }
+    }
+
+    let save_now = Confirm::new()
+        .with_prompt("Save to profiles.toml?")
+        .default(true)
+        .interact()?;
+    if !save_now {
+        println!("Aborted, not saved.");
+        return Ok(());
+    }
+
+    profiles.connections.insert(name.clone(), conn);
+    let path = profiles.save()?;
+    println!("Saved '{name}' to {}", path.display());
+    Ok(())
+}
+
+fn prompt_unique_name(profiles: &Profiles) -> Result<String> {
+    loop {
+        let name: String = Input::new()
+            .with_prompt("Connection name")
+            .interact_text()?;
+        match validate_new_name(profiles, &name) {
+            Ok(()) => return Ok(name),
+            Err(e) => eprintln!("{e}"),
+        }
+    }
+}
+
+fn prompt_connection() -> Result<Connection> {
+    const TYPES: &[&str] = &["duckdb", "postgres", "clickhouse", "snowflake", "databricks"];
+    let idx = Select::new()
+        .with_prompt("Connection type")
+        .items(TYPES)
+        .default(0)
+        .interact()?;
+    Ok(match TYPES[idx] {
+        "duckdb" => Connection::DuckDb(prompt_duckdb()?),
+        "postgres" => Connection::Postgres(prompt_postgres()?),
+        "clickhouse" => Connection::ClickHouse(prompt_clickhouse()?),
+        "snowflake" => Connection::Snowflake(prompt_snowflake()?),
+        "databricks" => Connection::Databricks(prompt_databricks()?),
+        _ => unreachable!(),
+    })
+}
+
+fn prompt_duckdb() -> Result<DuckDbConnection> {
+    let path: String = Input::new()
+        .with_prompt("DuckDB path (use :memory: for in-memory)")
+        .interact_text()?;
+    Ok(DuckDbConnection {
+        path,
+        cache_schema: prompt_cache_schema()?,
+    })
+}
+
+fn prompt_postgres() -> Result<PostgresConnection> {
+    let host: String = Input::new().with_prompt("Host").interact_text()?;
+    let port: u16 = Input::new()
+        .with_prompt("Port")
+        .default(5432u16)
+        .interact_text()?;
+    let user: String = Input::new().with_prompt("User").interact_text()?;
+    let password = prompt_optional_password("Password (blank for none)")?;
+    let database: String = Input::new().with_prompt("Database").interact_text()?;
+    let schema = prompt_optional("Schema (blank for default)")?;
+    Ok(PostgresConnection {
+        host,
+        port,
+        user,
+        password,
+        database,
+        schema,
+        cache_schema: prompt_cache_schema()?,
+    })
+}
+
+fn prompt_clickhouse() -> Result<ClickHouseConnection> {
+    let url: String = Input::new()
+        .with_prompt("URL")
+        .default("http://localhost:8123".to_string())
+        .interact_text()?;
+    let user: String = Input::new()
+        .with_prompt("User")
+        .default("default".to_string())
+        .interact_text()?;
+    let password = prompt_optional_password("Password (blank for none)")?;
+    let database: String = Input::new()
+        .with_prompt("Database")
+        .default("default".to_string())
+        .interact_text()?;
+    Ok(ClickHouseConnection {
+        url,
+        user,
+        password,
+        database,
+        cache_schema: prompt_cache_schema()?,
+    })
+}
+
+fn prompt_snowflake() -> Result<SnowflakeConnection> {
+    let account: String = Input::new()
+        .with_prompt("Account identifier")
+        .interact_text()?;
+
+    const AUTHS: &[&str] = &["password", "oauth", "browser"];
+    let idx = Select::new()
+        .with_prompt("Authentication method")
+        .items(AUTHS)
+        .default(0)
+        .interact()?;
+    let auth = match AUTHS[idx] {
+        "password" => {
+            let user: String = Input::new().with_prompt("User").interact_text()?;
+            let password: String = Password::new().with_prompt("Password").interact()?;
+            SnowflakeAuth::Password { user, password }
+        }
+        "oauth" => {
+            let oauth_token: String =
+                Password::new().with_prompt("OAuth token").interact()?;
+            SnowflakeAuth::OAuth { oauth_token }
+        }
+        "browser" => {
+            let user: String = Input::new().with_prompt("User").interact_text()?;
+            SnowflakeAuth::Browser { user }
+        }
+        _ => unreachable!(),
+    };
+
+    let database: String = Input::new().with_prompt("Database").interact_text()?;
+    let warehouse = prompt_optional("Warehouse (blank for none)")?;
+    let schema = prompt_optional("Schema (blank for none)")?;
+    let role = prompt_optional("Role (blank for none)")?;
+    Ok(SnowflakeConnection {
+        account,
+        auth,
+        database,
+        warehouse,
+        schema,
+        role,
+        cache_schema: prompt_cache_schema()?,
+    })
+}
+
+fn prompt_databricks() -> Result<DatabricksConnection> {
+    let host: String = Input::new().with_prompt("Host").interact_text()?;
+    let token: String = Password::new().with_prompt("Token").interact()?;
+    let warehouse_id: String = Input::new().with_prompt("Warehouse ID").interact_text()?;
+    let catalog = prompt_optional("Catalog (blank for none)")?;
+    let schema = prompt_optional("Schema (blank for none)")?;
+    Ok(DatabricksConnection {
+        host,
+        token,
+        warehouse_id,
+        catalog,
+        schema,
+        cache_schema: prompt_cache_schema()?,
+    })
+}
+
+fn prompt_optional(prompt: &str) -> Result<Option<String>> {
+    let v: String = Input::new()
+        .with_prompt(prompt)
+        .allow_empty(true)
+        .interact_text()?;
+    Ok(if v.is_empty() { None } else { Some(v) })
+}
+
+fn prompt_optional_password(prompt: &str) -> Result<Option<String>> {
+    let v: String = Password::new()
+        .with_prompt(prompt)
+        .allow_empty_password(true)
+        .interact()?;
+    Ok(if v.is_empty() { None } else { Some(v) })
+}
+
+fn prompt_cache_schema() -> Result<bool> {
+    Ok(Confirm::new()
+        .with_prompt("Cache schema for faster startup?")
+        .default(false)
+        .interact()?)
 }
 
 fn resolve_query(query: Option<String>, file: Option<PathBuf>) -> Result<String> {
