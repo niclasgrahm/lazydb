@@ -13,3 +13,8 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    groups:
+      # Action bumps are near-always mechanical; batch them into one PR.
+      github-actions:
+        patterns: ["*"]
+        update-types: [major, minor, patch]
