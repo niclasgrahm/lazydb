@@ -46,23 +46,23 @@ pub struct SchemaNode {
 
 impl SchemaNode {
     pub fn leaf(label: impl Into<String>) -> Self {
-        Self { label: label.into(), children: vec![] }
+        Self {
+            label: label.into(),
+            children: vec![],
+        }
     }
 
     pub fn group(label: impl Into<String>, children: Vec<SchemaNode>) -> Self {
-        Self { label: label.into(), children }
+        Self {
+            label: label.into(),
+            children,
+        }
     }
 }
 
 /// Callback invoked by backends during slow `schema_tree` operations to
 /// report progress. The string is shown in the connection modal.
 pub type ProgressFn = dyn Fn(&str) + Send + Sync;
-
-/// Returns a `ProgressFn` that does nothing — useful for callers that
-/// don't care about progress (e.g. CLI tools, tests).
-pub fn no_progress() -> Box<ProgressFn> {
-    Box::new(|_| {})
-}
 
 /// Trait that all database backends implement.
 pub trait Database: Send {
@@ -89,11 +89,6 @@ impl MockDatabase {
 
     pub fn with_schema(mut self, schema: Vec<SchemaNode>) -> Self {
         self.schema = schema;
-        self
-    }
-
-    pub fn with_query_results(mut self, results: Vec<Result<QueryResult, String>>) -> Self {
-        self.query_results = results;
         self
     }
 }
@@ -137,7 +132,7 @@ mod tests {
 
     #[test]
     fn value_display_float() {
-        assert_eq!(Value::Float(3.14).to_string(), "3.14");
+        assert_eq!(Value::Float(2.5).to_string(), "2.5");
     }
 
     #[test]
@@ -146,7 +141,7 @@ mod tests {
             Value::Null,
             Value::Bool(true),
             Value::Int(42),
-            Value::Float(3.14),
+            Value::Float(2.5),
             Value::Text("hello".into()),
         ];
         for val in &values {

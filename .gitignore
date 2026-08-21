@@ -1,1 +1,11 @@
 /target
+
+# Editor / OS cruft
+.DS_Store
+*.swp
+.idea/
+
+# Local scratch
+*.db
+*.duckdb
+/scratch/

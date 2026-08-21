@@ -1,9 +1,9 @@
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, List, ListItem, Padding, Paragraph},
-    Frame,
 };
 
 use crate::app::{App, Focus};
@@ -59,11 +59,7 @@ pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
                 String::new()
             };
             let icon = if node.has_children {
-                if node.expanded {
-                    "▼ "
-                } else {
-                    "▶ "
-                }
+                if node.expanded { "▼ " } else { "▶ " }
             } else {
                 "  "
             };

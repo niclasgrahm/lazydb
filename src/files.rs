@@ -7,8 +7,8 @@ pub const SENTINEL: &str = "…";
 
 /// Extensions considered text-like (openable in the query editor).
 const TEXT_EXTENSIONS: &[&str] = &[
-    "sql", "txt", "csv", "json", "toml", "yaml", "yml", "md", "py", "sh", "rs", "go", "js",
-    "ts", "lua", "cfg", "ini", "xml", "html",
+    "sql", "txt", "csv", "json", "toml", "yaml", "yml", "md", "py", "sh", "rs", "go", "js", "ts",
+    "lua", "cfg", "ini", "xml", "html",
 ];
 
 /// Check if a file is text-like based on its extension.
@@ -72,11 +72,7 @@ pub fn build_file_tree(path: &Path) -> Vec<TreeNode> {
 
 /// Populate children of a directory node at `flat_index`, replacing the sentinel.
 /// `file_paths` must be the current path index (parallel to flatten_all output).
-pub fn populate_children(
-    nodes: &mut [TreeNode],
-    flat_index: usize,
-    file_paths: &[PathBuf],
-) {
+pub fn populate_children(nodes: &mut [TreeNode], flat_index: usize, file_paths: &[PathBuf]) {
     let dir_path = &file_paths[flat_index];
     let entries = read_directory(dir_path);
     let children: Vec<TreeNode> = entries
@@ -101,15 +97,13 @@ pub fn is_sentinel(nodes: &[TreeNode], flat_index: usize) -> bool {
     fn walk(nodes: &[TreeNode], target: usize, counter: &mut usize) -> Option<bool> {
         for node in nodes {
             if *counter == target {
-                return Some(
-                    node.children.len() == 1 && node.children[0].label == SENTINEL,
-                );
+                return Some(node.children.len() == 1 && node.children[0].label == SENTINEL);
             }
             *counter += 1;
-            if node.expanded {
-                if let Some(result) = walk(&node.children, target, counter) {
-                    return Some(result);
-                }
+            if node.expanded
+                && let Some(result) = walk(&node.children, target, counter)
+            {
+                return Some(result);
             }
         }
         None
@@ -175,7 +169,10 @@ mod tests {
 
         let entries = read_directory(dir.path());
         let names: Vec<&str> = entries.iter().map(|e| e.0.as_str()).collect();
-        assert_eq!(names, vec!["alpha_dir", "beta_dir", "apple.txt", "zebra.sql"]);
+        assert_eq!(
+            names,
+            vec!["alpha_dir", "beta_dir", "apple.txt", "zebra.sql"]
+        );
 
         assert!(entries[0].1); // alpha_dir is_dir
         assert!(entries[1].1); // beta_dir is_dir
@@ -281,19 +278,13 @@ mod tests {
 
     #[test]
     fn is_sentinel_detects_placeholder() {
-        let tree = vec![TreeNode::folder(
-            "dir",
-            vec![TreeNode::leaf(SENTINEL)],
-        )];
+        let tree = vec![TreeNode::folder("dir", vec![TreeNode::leaf(SENTINEL)])];
         assert!(is_sentinel(&tree, 0));
     }
 
     #[test]
     fn is_sentinel_false_for_real_children() {
-        let mut tree = vec![TreeNode::folder(
-            "dir",
-            vec![TreeNode::leaf("real.sql")],
-        )];
+        let mut tree = vec![TreeNode::folder("dir", vec![TreeNode::leaf("real.sql")])];
         tree[0].expanded = true;
         assert!(!is_sentinel(&tree, 0));
     }

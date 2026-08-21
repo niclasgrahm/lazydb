@@ -33,7 +33,15 @@ impl Snowflake {
         schema: Option<&str>,
         role: Option<&str>,
     ) -> Result<Self, String> {
-        info!(account, user, database, ?warehouse, ?schema, ?role, "snowflake: connecting with password auth");
+        info!(
+            account,
+            user,
+            database,
+            ?warehouse,
+            ?schema,
+            ?role,
+            "snowflake: connecting with password auth"
+        );
         let start = Instant::now();
         let account_url = format!("https://{account}.snowflakecomputing.com");
 
@@ -77,7 +85,11 @@ impl Snowflake {
                 error!("snowflake: login request failed: {e}");
                 format!("Snowflake login request failed: {e}")
             })?;
-        debug!(elapsed_ms = req_start.elapsed().as_millis(), status = response.status().as_u16(), "snowflake: login response received");
+        debug!(
+            elapsed_ms = req_start.elapsed().as_millis(),
+            status = response.status().as_u16(),
+            "snowflake: login response received"
+        );
 
         let body = response
             .body_mut()
@@ -89,9 +101,7 @@ impl Snowflake {
             serde_json::from_str(&body).map_err(|e| format!("Login JSON parse error: {e}"))?;
 
         if !json["success"].as_bool().unwrap_or(false) {
-            let msg = json["message"]
-                .as_str()
-                .unwrap_or("Unknown login error");
+            let msg = json["message"].as_str().unwrap_or("Unknown login error");
             error!("snowflake: login failed: {msg}");
             return Err(format!("Snowflake login failed: {msg}"));
         }
@@ -100,7 +110,10 @@ impl Snowflake {
             .as_str()
             .ok_or("No token in login response")?
             .to_string();
-        info!(elapsed_ms = start.elapsed().as_millis(), "snowflake: password auth successful");
+        info!(
+            elapsed_ms = start.elapsed().as_millis(),
+            "snowflake: password auth successful"
+        );
 
         let sf = Self {
             account_url,
@@ -115,7 +128,10 @@ impl Snowflake {
         // Verify connectivity
         debug!("snowflake: verifying connectivity with SELECT 1");
         sf.raw_query("SELECT 1")?;
-        info!(total_elapsed_ms = start.elapsed().as_millis(), "snowflake: password connection fully established");
+        info!(
+            total_elapsed_ms = start.elapsed().as_millis(),
+            "snowflake: password connection fully established"
+        );
         Ok(sf)
     }
 
@@ -127,7 +143,14 @@ impl Snowflake {
         schema: Option<&str>,
         role: Option<&str>,
     ) -> Result<Self, String> {
-        info!(account, database, ?warehouse, ?schema, ?role, "snowflake: connecting with OAuth");
+        info!(
+            account,
+            database,
+            ?warehouse,
+            ?schema,
+            ?role,
+            "snowflake: connecting with OAuth"
+        );
         let start = Instant::now();
         let sf = Self {
             account_url: format!("https://{account}.snowflakecomputing.com"),
@@ -142,7 +165,10 @@ impl Snowflake {
         // Verify connectivity
         debug!("snowflake: verifying OAuth connectivity with SELECT 1");
         sf.raw_query("SELECT 1")?;
-        info!(elapsed_ms = start.elapsed().as_millis(), "snowflake: OAuth connection established");
+        info!(
+            elapsed_ms = start.elapsed().as_millis(),
+            "snowflake: OAuth connection established"
+        );
         Ok(sf)
     }
 
@@ -154,7 +180,15 @@ impl Snowflake {
         schema: Option<&str>,
         role: Option<&str>,
     ) -> Result<Self, String> {
-        info!(account, user, database, ?warehouse, ?schema, ?role, "snowflake: connecting with browser SSO");
+        info!(
+            account,
+            user,
+            database,
+            ?warehouse,
+            ?schema,
+            ?role,
+            "snowflake: connecting with browser SSO"
+        );
         let start = Instant::now();
         let account_url = format!("https://{account}.snowflakecomputing.com");
 
@@ -221,7 +255,11 @@ impl Snowflake {
                 error!("snowflake: authenticator request failed: {e}");
                 format!("Snowflake authenticator request failed: {e}")
             })?;
-        debug!(elapsed_ms = req_start.elapsed().as_millis(), status = response.status().as_u16(), "snowflake: authenticator response received");
+        debug!(
+            elapsed_ms = req_start.elapsed().as_millis(),
+            status = response.status().as_u16(),
+            "snowflake: authenticator response received"
+        );
 
         let body = response
             .body_mut()
@@ -257,7 +295,10 @@ impl Snowflake {
             .set_nonblocking(false)
             .map_err(|e| format!("Failed to set listener blocking: {e}"))?;
         let saml_token = accept_sso_callback(&listener)?;
-        debug!(elapsed_ms = start.elapsed().as_millis(), "snowflake: SSO callback received, got SAML token");
+        debug!(
+            elapsed_ms = start.elapsed().as_millis(),
+            "snowflake: SSO callback received, got SAML token"
+        );
 
         // Step 4: Authenticate with the SAML token + proof key
         // Database/schema/warehouse/role go as URL query params per Snowflake protocol
@@ -300,7 +341,11 @@ impl Snowflake {
                 error!("snowflake: SSO login request failed: {e}");
                 format!("Snowflake login request failed: {e}")
             })?;
-        debug!(elapsed_ms = req_start.elapsed().as_millis(), status = response.status().as_u16(), "snowflake: SSO login response received");
+        debug!(
+            elapsed_ms = req_start.elapsed().as_millis(),
+            status = response.status().as_u16(),
+            "snowflake: SSO login response received"
+        );
 
         let status = response.status();
         let body = response
@@ -309,17 +354,21 @@ impl Snowflake {
             .map_err(|e| format!("Failed to read login response: {e}"))?;
 
         if !status.is_success() && body.trim().is_empty() {
-            error!(status = status.as_u16(), "snowflake: SSO login failed with empty response");
-            return Err(format!("Snowflake SSO login failed with HTTP {}", status.as_u16()));
+            error!(
+                status = status.as_u16(),
+                "snowflake: SSO login failed with empty response"
+            );
+            return Err(format!(
+                "Snowflake SSO login failed with HTTP {}",
+                status.as_u16()
+            ));
         }
 
-        let json: serde_json::Value =
-            serde_json::from_str(&body).map_err(|e| format!("Login JSON parse error: {e}. Body: {body}"))?;
+        let json: serde_json::Value = serde_json::from_str(&body)
+            .map_err(|e| format!("Login JSON parse error: {e}. Body: {body}"))?;
 
         if !json["success"].as_bool().unwrap_or(false) {
-            let msg = json["message"]
-                .as_str()
-                .unwrap_or("Unknown login error");
+            let msg = json["message"].as_str().unwrap_or("Unknown login error");
             error!("snowflake: SSO login failed: {msg}");
             return Err(format!("Snowflake SSO login failed: {msg}"));
         }
@@ -341,11 +390,14 @@ impl Snowflake {
 
         debug!("snowflake: verifying SSO connectivity with SELECT 1");
         sf.raw_query("SELECT 1")?;
-        info!(total_elapsed_ms = start.elapsed().as_millis(), "snowflake: browser SSO connection fully established");
-        
+        info!(
+            total_elapsed_ms = start.elapsed().as_millis(),
+            "snowflake: browser SSO connection fully established"
+        );
+
         // Cache the token for future use
         save_cached_token(account, user, role, &sf.token);
-        
+
         Ok(sf)
     }
 
@@ -358,8 +410,13 @@ impl Snowflake {
             AuthMethod::OAuth => self.raw_query_v2(sql),
         };
         match &result {
-            Ok(_) => debug!(elapsed_ms = start.elapsed().as_millis(), "snowflake: raw query succeeded"),
-            Err(e) => error!(elapsed_ms = start.elapsed().as_millis(), error = %e, "snowflake: raw query failed"),
+            Ok(_) => debug!(
+                elapsed_ms = start.elapsed().as_millis(),
+                "snowflake: raw query succeeded"
+            ),
+            Err(e) => {
+                error!(elapsed_ms = start.elapsed().as_millis(), error = %e, "snowflake: raw query failed")
+            }
         }
         result
     }
@@ -390,29 +447,41 @@ impl Snowflake {
             .header("Accept", "application/json")
             .send(body.to_string().as_bytes())
             .map_err(|e| format!("Snowflake request failed: {e}"))?;
-        debug!(elapsed_ms = req_start.elapsed().as_millis(), status = response.status().as_u16(), "snowflake v1: response received");
+        debug!(
+            elapsed_ms = req_start.elapsed().as_millis(),
+            status = response.status().as_u16(),
+            "snowflake v1: response received"
+        );
 
         let resp_body = response
             .body_mut()
             .read_to_string()
             .map_err(|e| format!("Failed to read Snowflake response: {e}"))?;
-        debug!(body_len = resp_body.len(), "snowflake v1: response body read");
+        debug!(
+            body_len = resp_body.len(),
+            "snowflake v1: response body read"
+        );
 
         if resp_body.is_empty() {
-            error!(status = response.status().as_u16(), "snowflake v1: empty response body");
+            error!(
+                status = response.status().as_u16(),
+                "snowflake v1: empty response body"
+            );
             return Err(format!(
                 "Snowflake returned empty response (HTTP {})",
                 response.status().as_u16()
             ));
         }
 
-        let json: serde_json::Value = serde_json::from_str(&resp_body)
-            .map_err(|e| format!("JSON parse error: {e} — raw response: {}", &resp_body[..resp_body.len().min(500)]))?;
+        let json: serde_json::Value = serde_json::from_str(&resp_body).map_err(|e| {
+            format!(
+                "JSON parse error: {e} — raw response: {}",
+                &resp_body[..resp_body.len().min(500)]
+            )
+        })?;
 
         if !json["success"].as_bool().unwrap_or(false) {
-            let msg = json["message"]
-                .as_str()
-                .unwrap_or(&resp_body);
+            let msg = json["message"].as_str().unwrap_or(&resp_body);
             error!(msg, "snowflake v1: query returned error");
             return Err(format!("Snowflake error: {msg}"));
         }
@@ -460,30 +529,38 @@ impl Snowflake {
             .header("X-Snowflake-Authorization-Token-Type", "OAUTH")
             .send(body.to_string().as_bytes())
             .map_err(|e| format!("Snowflake request failed: {e}"))?;
-        debug!(elapsed_ms = req_start.elapsed().as_millis(), status = response.status().as_u16(), "snowflake v2: response received");
+        debug!(
+            elapsed_ms = req_start.elapsed().as_millis(),
+            status = response.status().as_u16(),
+            "snowflake v2: response received"
+        );
 
         let resp_body = response
             .body_mut()
             .read_to_string()
             .map_err(|e| format!("Failed to read Snowflake response: {e}"))?;
-        debug!(body_len = resp_body.len(), "snowflake v2: response body read");
+        debug!(
+            body_len = resp_body.len(),
+            "snowflake v2: response body read"
+        );
 
-        let json: serde_json::Value = serde_json::from_str(&resp_body)
-            .map_err(|e| format!("JSON parse error: {e}"))?;
+        let json: serde_json::Value =
+            serde_json::from_str(&resp_body).map_err(|e| format!("JSON parse error: {e}"))?;
 
         let status_code = response.status().as_u16();
         if status_code == 202 {
             let statement_handle = json["statementHandle"]
                 .as_str()
                 .ok_or("No statementHandle in async response")?;
-            info!(statement_handle, "snowflake v2: query running async, polling for results");
+            info!(
+                statement_handle,
+                "snowflake v2: query running async, polling for results"
+            );
             return self.poll_for_results(statement_handle);
         }
 
         if status_code >= 400 {
-            let msg = json["message"]
-                .as_str()
-                .unwrap_or(&resp_body);
+            let msg = json["message"].as_str().unwrap_or(&resp_body);
             error!(status_code, msg, "snowflake v2: query returned error");
             return Err(format!("Snowflake error: {msg}"));
         }
@@ -503,7 +580,10 @@ impl Snowflake {
         let auth = format!("Bearer {}", self.token);
         let backoffs = [500, 1000, 2000, 4000, 8000, 10000, 10000, 10000];
         for (attempt, wait_ms) in backoffs.iter().enumerate() {
-            debug!(attempt = attempt + 1, wait_ms, "snowflake: polling for async results");
+            debug!(
+                attempt = attempt + 1,
+                wait_ms, "snowflake: polling for async results"
+            );
             thread::sleep(Duration::from_millis(*wait_ms));
 
             let mut response = agent
@@ -523,19 +603,34 @@ impl Snowflake {
 
             let status = response.status().as_u16();
             if status == 202 {
-                debug!(elapsed_ms = poll_start.elapsed().as_millis(), "snowflake: still waiting (202)");
+                debug!(
+                    elapsed_ms = poll_start.elapsed().as_millis(),
+                    "snowflake: still waiting (202)"
+                );
                 continue;
             }
             if status >= 400 {
                 let msg = json["message"].as_str().unwrap_or(&body);
-                error!(status, elapsed_ms = poll_start.elapsed().as_millis(), msg, "snowflake: poll returned error");
+                error!(
+                    status,
+                    elapsed_ms = poll_start.elapsed().as_millis(),
+                    msg,
+                    "snowflake: poll returned error"
+                );
                 return Err(format!("Snowflake error: {msg}"));
             }
-            info!(elapsed_ms = poll_start.elapsed().as_millis(), attempts = attempt + 1, "snowflake: async query completed");
+            info!(
+                elapsed_ms = poll_start.elapsed().as_millis(),
+                attempts = attempt + 1,
+                "snowflake: async query completed"
+            );
             return Ok(json);
         }
 
-        error!(elapsed_ms = poll_start.elapsed().as_millis(), "snowflake: query timed out after all poll attempts");
+        error!(
+            elapsed_ms = poll_start.elapsed().as_millis(),
+            "snowflake: query timed out after all poll attempts"
+        );
         Err("Snowflake query timed out waiting for results".to_string())
     }
 
@@ -552,10 +647,10 @@ impl Snowflake {
 
         let mut result = Vec::new();
         for row in rows {
-            if let Some(arr) = row.as_array() {
-                if let Some(val) = arr.get(col_idx).and_then(|v| v.as_str()) {
-                    result.push(val.to_string());
-                }
+            if let Some(arr) = row.as_array()
+                && let Some(val) = arr.get(col_idx).and_then(|v| v.as_str())
+            {
+                result.push(val.to_string());
             }
         }
         Ok(result)
@@ -701,7 +796,12 @@ impl Database for Snowflake {
             })
             .unwrap_or_default();
 
-        info!(elapsed_ms = start.elapsed().as_millis(), columns = columns.len(), rows = rows.len(), "snowflake: execute_query complete");
+        info!(
+            elapsed_ms = start.elapsed().as_millis(),
+            columns = columns.len(),
+            rows = rows.len(),
+            "snowflake: execute_query complete"
+        );
         Ok(QueryResult { columns, rows })
     }
 
@@ -711,7 +811,11 @@ impl Database for Snowflake {
 
         progress("listing accessible databases…");
         let databases = self.list_accessible_databases()?;
-        debug!(db_count = databases.len(), ?databases, "snowflake: found accessible databases");
+        debug!(
+            db_count = databases.len(),
+            ?databases,
+            "snowflake: found accessible databases"
+        );
 
         let total = databases.len();
         let mut db_nodes = Vec::new();
@@ -720,11 +824,17 @@ impl Database for Snowflake {
             match self.introspect_database(db) {
                 Ok(Some(node)) => db_nodes.push(node),
                 Ok(None) => debug!(database = db, "snowflake: skipping empty database"),
-                Err(e) => debug!(database = db, error = %e, "snowflake: failed to introspect database, skipping"),
+                Err(e) => {
+                    debug!(database = db, error = %e, "snowflake: failed to introspect database, skipping")
+                }
             }
         }
 
-        info!(total_databases = db_nodes.len(), elapsed_ms = start.elapsed().as_millis(), "snowflake: schema tree complete");
+        info!(
+            total_databases = db_nodes.len(),
+            elapsed_ms = start.elapsed().as_millis(),
+            "snowflake: schema tree complete"
+        );
         Ok(db_nodes)
     }
 }
@@ -742,7 +852,9 @@ fn open_browser(url: &str) -> Result<(), String> {
     let result = if cfg!(target_os = "macos") {
         std::process::Command::new("open").arg(url).status()
     } else if cfg!(target_os = "windows") {
-        std::process::Command::new("cmd").args(["/C", "start", url]).status()
+        std::process::Command::new("cmd")
+            .args(["/C", "start", url])
+            .status()
     } else {
         std::process::Command::new("xdg-open").arg(url).status()
     };
@@ -768,7 +880,10 @@ fn accept_sso_callback(listener: &TcpListener) -> Result<String, String> {
             Ok(conn) => break conn,
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 if Instant::now() > deadline {
-                    return Err("SSO callback timed out (120s) — browser may not have redirected back".to_string());
+                    return Err(
+                        "SSO callback timed out (120s) — browser may not have redirected back"
+                            .to_string(),
+                    );
                 }
                 thread::sleep(Duration::from_millis(100));
             }
@@ -795,10 +910,19 @@ fn accept_sso_callback(listener: &TcpListener) -> Result<String, String> {
         .and_then(|qs| {
             qs.split('&').find_map(|param| {
                 let (key, val) = param.split_once('=')?;
-                if key == "token" { Some(val.to_string()) } else { None }
+                if key == "token" {
+                    Some(val.to_string())
+                } else {
+                    None
+                }
             })
         })
-        .ok_or_else(|| format!("No token found in SSO callback: {}", request.lines().next().unwrap_or("")))?;
+        .ok_or_else(|| {
+            format!(
+                "No token found in SSO callback: {}",
+                request.lines().next().unwrap_or("")
+            )
+        })?;
 
     // Send a success response to the browser
     let html = "<html><body><h3>Authentication successful.</h3>\
@@ -822,7 +946,9 @@ fn uuid_v4() -> String {
         .unwrap_or_default()
         .as_nanos();
     // Use nanos + thread id for basic uniqueness; not cryptographic but sufficient for requestId
-    let hash = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    let hash = seed
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
     let bytes = hash.to_le_bytes();
     format!(
         "{:08x}-{:04x}-4{:03x}-{:04x}-{:012x}",
@@ -830,7 +956,9 @@ fn uuid_v4() -> String {
         u16::from_le_bytes([bytes[4], bytes[5]]),
         u16::from_le_bytes([bytes[6], bytes[7]]) & 0x0FFF,
         (u16::from_le_bytes([bytes[8], bytes[9]]) & 0x3FFF) | 0x8000,
-        u64::from_le_bytes([bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15], 0, 0]),
+        u64::from_le_bytes([
+            bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15], 0, 0
+        ]),
     )
 }
 
@@ -877,19 +1005,20 @@ fn get_cached_token(account: &str, user: &str, role: Option<&str>) -> Option<Str
 
 fn save_cached_token(account: &str, user: &str, role: Option<&str>, token: &str) {
     let path = cache_file_path();
-    let mut cache: std::collections::HashMap<String, String> = if let Ok(contents) = std::fs::read_to_string(&path) {
-        serde_json::from_str(&contents).unwrap_or_default()
-    } else {
-        std::collections::HashMap::new()
-    };
-    
+    let mut cache: std::collections::HashMap<String, String> =
+        if let Ok(contents) = std::fs::read_to_string(&path) {
+            serde_json::from_str(&contents).unwrap_or_default()
+        } else {
+            std::collections::HashMap::new()
+        };
+
     let key = format!("{}:{}:{}", account, user, role.unwrap_or(""));
     cache.insert(key, token.to_string());
-    
+
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    
+
     if let Ok(json) = serde_json::to_string_pretty(&cache) {
         let _ = std::fs::write(path, json);
     }

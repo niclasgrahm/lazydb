@@ -1,9 +1,9 @@
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Padding, Paragraph},
-    Frame,
 };
 
 use crate::app::{App, EditorViewport, Focus};
@@ -88,10 +88,10 @@ pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
             let screen_y = inner.y + (row - scroll_row) as u16;
             for col in col_start..col_end {
                 let screen_x = inner.x + col as u16;
-                if screen_x < inner.x + inner.width {
-                    if let Some(cell) = frame.buffer_mut().cell_mut((screen_x, screen_y)) {
-                        cell.set_style(sel_style);
-                    }
+                if screen_x < inner.x + inner.width
+                    && let Some(cell) = frame.buffer_mut().cell_mut((screen_x, screen_y))
+                {
+                    cell.set_style(sel_style);
                 }
             }
         }

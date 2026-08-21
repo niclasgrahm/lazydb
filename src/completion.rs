@@ -258,14 +258,14 @@ fn is_group_label(s: &str) -> bool {
 /// children are all leaves (e.g. columns) or which has no children at all.
 /// Skips well-known group-label segments ("Tables", "Views") in the output path.
 fn collect_table_paths(node: &SchemaNode, stack: &mut Vec<String>, out: &mut Vec<Vec<String>>) {
-    let is_group = node.label.eq_ignore_ascii_case("Tables")
-        || node.label.eq_ignore_ascii_case("Views");
+    let is_group =
+        node.label.eq_ignore_ascii_case("Tables") || node.label.eq_ignore_ascii_case("Views");
     if !is_group {
         stack.push(node.label.clone());
     }
 
-    let children_are_leaves = !node.children.is_empty()
-        && node.children.iter().all(|c| c.children.is_empty());
+    let children_are_leaves =
+        !node.children.is_empty() && node.children.iter().all(|c| c.children.is_empty());
 
     if node.children.is_empty() || children_are_leaves {
         // Treat as a table (or leaf), but only if we actually have a path.
@@ -468,26 +468,38 @@ mod tests {
 
     fn fixture() -> Vec<SchemaNode> {
         vec![
-            SchemaNode::group("catA", vec![
-                SchemaNode::group("scA", vec![
-                    SchemaNode::group("Tables", vec![
-                        SchemaNode::group("users", vec![SchemaNode::leaf("id")]),
-                        SchemaNode::group("flushed_records", vec![SchemaNode::leaf("id")]),
-                    ]),
-                ]),
-                SchemaNode::group("scB", vec![
-                    SchemaNode::group("Tables", vec![
-                        SchemaNode::group("orders", vec![SchemaNode::leaf("id")]),
-                    ]),
-                ]),
-            ]),
-            SchemaNode::group("catB", vec![
-                SchemaNode::group("scX", vec![
-                    SchemaNode::group("Tables", vec![
-                        SchemaNode::group("items", vec![SchemaNode::leaf("id")]),
-                    ]),
-                ]),
-            ]),
+            SchemaNode::group(
+                "catA",
+                vec![
+                    SchemaNode::group(
+                        "scA",
+                        vec![SchemaNode::group(
+                            "Tables",
+                            vec![
+                                SchemaNode::group("users", vec![SchemaNode::leaf("id")]),
+                                SchemaNode::group("flushed_records", vec![SchemaNode::leaf("id")]),
+                            ],
+                        )],
+                    ),
+                    SchemaNode::group(
+                        "scB",
+                        vec![SchemaNode::group(
+                            "Tables",
+                            vec![SchemaNode::group("orders", vec![SchemaNode::leaf("id")])],
+                        )],
+                    ),
+                ],
+            ),
+            SchemaNode::group(
+                "catB",
+                vec![SchemaNode::group(
+                    "scX",
+                    vec![SchemaNode::group(
+                        "Tables",
+                        vec![SchemaNode::group("items", vec![SchemaNode::leaf("id")])],
+                    )],
+                )],
+            ),
         ]
     }
 

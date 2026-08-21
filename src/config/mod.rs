@@ -5,12 +5,12 @@ use std::path::PathBuf;
 use color_eyre::eyre::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::db::Database;
 use crate::db::clickhouse_backend::ClickHouse;
 use crate::db::databricks_backend::Databricks;
 use crate::db::duckdb_backend::DuckDb;
 use crate::db::postgres_backend::Postgres;
 use crate::db::snowflake_backend::Snowflake;
-use crate::db::Database;
 use crate::keybindings::KeybindingsConfig;
 
 pub(crate) fn config_dir() -> PathBuf {
@@ -61,15 +61,15 @@ impl AppConfig {
         }
         let content = fs::read_to_string(&path)
             .wrap_err_with(|| format!("Failed to read {}", path.display()))?;
-        let config: AppConfig =
-            toml::from_str(&content).wrap_err_with(|| format!("Failed to parse {}", path.display()))?;
+        let config: AppConfig = toml::from_str(&content)
+            .wrap_err_with(|| format!("Failed to parse {}", path.display()))?;
         Ok(config)
     }
 }
 
 // --- Connection profiles (~/.config/lazydb/profiles.toml) ---
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Default)]
 pub struct Profiles {
     #[serde(default)]
     pub connections: BTreeMap<String, Connection>,
@@ -132,6 +132,7 @@ impl PostgresConnection {
         s
     }
 
+    #[allow(dead_code)] // Part of the connection config API; covered by tests.
     pub fn schema_name(&self) -> &str {
         self.schema.as_deref().unwrap_or("public")
     }
@@ -229,10 +230,8 @@ impl Connection {
             Connection::DuckDb(cfg) => {
                 DuckDb::connect(&cfg.path).map(|db| Box::new(db) as Box<dyn Database>)
             }
-            Connection::Postgres(cfg) => {
-                Postgres::connect(&cfg.connection_string())
-                    .map(|db| Box::new(db) as Box<dyn Database>)
-            }
+            Connection::Postgres(cfg) => Postgres::connect(&cfg.connection_string())
+                .map(|db| Box::new(db) as Box<dyn Database>),
             Connection::ClickHouse(cfg) => {
                 ClickHouse::connect(&cfg.url, &cfg.database, &cfg.user, cfg.password.as_deref())
                     .map(|db| Box::new(db) as Box<dyn Database>)
@@ -267,24 +266,14 @@ impl Connection {
                 )
                 .map(|db| Box::new(db) as Box<dyn Database>),
             },
-            Connection::Databricks(cfg) => {
-                Databricks::connect(
-                    &cfg.host,
-                    &cfg.token,
-                    &cfg.warehouse_id,
-                    cfg.catalog.as_deref(),
-                    cfg.schema.as_deref(),
-                )
-                .map(|db| Box::new(db) as Box<dyn Database>)
-            }
-        }
-    }
-}
-
-impl Default for Profiles {
-    fn default() -> Self {
-        Self {
-            connections: BTreeMap::new(),
+            Connection::Databricks(cfg) => Databricks::connect(
+                &cfg.host,
+                &cfg.token,
+                &cfg.warehouse_id,
+                cfg.catalog.as_deref(),
+                cfg.schema.as_deref(),
+            )
+            .map(|db| Box::new(db) as Box<dyn Database>),
         }
     }
 }
@@ -297,8 +286,8 @@ impl Profiles {
         }
         let content = fs::read_to_string(&path)
             .wrap_err_with(|| format!("Failed to read {}", path.display()))?;
-        let profiles: Profiles =
-            toml::from_str(&content).wrap_err_with(|| format!("Failed to parse {}", path.display()))?;
+        let profiles: Profiles = toml::from_str(&content)
+            .wrap_err_with(|| format!("Failed to parse {}", path.display()))?;
         Ok(profiles)
     }
 
@@ -313,13 +302,12 @@ impl Profiles {
             fs::create_dir_all(parent)
                 .wrap_err_with(|| format!("Failed to create {}", parent.display()))?;
         }
-        let content = toml::to_string_pretty(self)
-            .wrap_err("Failed to serialize profiles")?;
+        let content = toml::to_string_pretty(self).wrap_err("Failed to serialize profiles")?;
         let tmp = path.with_extension("toml.tmp");
-        fs::write(&tmp, &content)
-            .wrap_err_with(|| format!("Failed to write {}", tmp.display()))?;
-        fs::rename(&tmp, path)
-            .wrap_err_with(|| format!("Failed to rename {} -> {}", tmp.display(), path.display()))?;
+        fs::write(&tmp, &content).wrap_err_with(|| format!("Failed to write {}", tmp.display()))?;
+        fs::rename(&tmp, path).wrap_err_with(|| {
+            format!("Failed to rename {} -> {}", tmp.display(), path.display())
+        })?;
         Ok(())
     }
 }
@@ -499,7 +487,9 @@ mod tests {
             Connection::Snowflake(sf) => {
                 assert_eq!(sf.account, "xy12345");
                 assert_eq!(sf.database, "PROD");
-                assert!(matches!(&sf.auth, SnowflakeAuth::Password { user, .. } if user == "user@example.com"));
+                assert!(
+                    matches!(&sf.auth, SnowflakeAuth::Password { user, .. } if user == "user@example.com")
+                );
             }
             _ => panic!("expected Snowflake"),
         }
@@ -518,7 +508,9 @@ mod tests {
         let profiles: Profiles = toml::from_str(toml).unwrap();
         match profiles.connections.get("sf").unwrap() {
             Connection::Snowflake(sf) => {
-                assert!(matches!(&sf.auth, SnowflakeAuth::OAuth { oauth_token } if oauth_token == "tok123"));
+                assert!(
+                    matches!(&sf.auth, SnowflakeAuth::OAuth { oauth_token } if oauth_token == "tok123")
+                );
             }
             _ => panic!("expected Snowflake"),
         }
@@ -537,7 +529,9 @@ mod tests {
         let profiles: Profiles = toml::from_str(toml).unwrap();
         match profiles.connections.get("sf").unwrap() {
             Connection::Snowflake(sf) => {
-                assert!(matches!(&sf.auth, SnowflakeAuth::Browser { user } if user == "user@example.com"));
+                assert!(
+                    matches!(&sf.auth, SnowflakeAuth::Browser { user } if user == "user@example.com")
+                );
             }
             _ => panic!("expected Snowflake"),
         }
@@ -545,18 +539,28 @@ mod tests {
 
     #[test]
     fn type_name_variants() {
-        let duckdb = Connection::DuckDb(DuckDbConnection { path: "x".into(), cache_schema: false });
+        let duckdb = Connection::DuckDb(DuckDbConnection {
+            path: "x".into(),
+            cache_schema: false,
+        });
         assert_eq!(duckdb.type_name(), "duckdb");
 
         let pg = Connection::Postgres(PostgresConnection {
-            host: "h".into(), port: 5432, user: "u".into(),
-            password: None, database: "d".into(), schema: None,
+            host: "h".into(),
+            port: 5432,
+            user: "u".into(),
+            password: None,
+            database: "d".into(),
+            schema: None,
             cache_schema: false,
         });
         assert_eq!(pg.type_name(), "postgres");
 
         let ch = Connection::ClickHouse(ClickHouseConnection {
-            url: "u".into(), user: "u".into(), password: None, database: "d".into(),
+            url: "u".into(),
+            user: "u".into(),
+            password: None,
+            database: "d".into(),
             cache_schema: false,
         });
         assert_eq!(ch.type_name(), "clickhouse");
@@ -564,14 +568,20 @@ mod tests {
         let sf = Connection::Snowflake(SnowflakeConnection {
             account: "a".into(),
             auth: SnowflakeAuth::Browser { user: "u".into() },
-            database: "d".into(), warehouse: None, schema: None, role: None,
+            database: "d".into(),
+            warehouse: None,
+            schema: None,
+            role: None,
             cache_schema: false,
         });
         assert_eq!(sf.type_name(), "snowflake");
 
         let db = Connection::Databricks(DatabricksConnection {
-            host: "h".into(), token: "t".into(), warehouse_id: "w".into(),
-            catalog: None, schema: None,
+            host: "h".into(),
+            token: "t".into(),
+            warehouse_id: "w".into(),
+            catalog: None,
+            schema: None,
             cache_schema: false,
         });
         assert_eq!(db.type_name(), "databricks");
@@ -666,16 +676,25 @@ mod tests {
     #[test]
     fn cache_schema_on_each_variant() {
         let cases = [
-            (r#"type = "duckdb"
+            (
+                r#"type = "duckdb"
                 path = "/tmp/x.db"
-                cache_schema = true"#, true),
-            (r#"type = "clickhouse"
-                cache_schema = true"#, true),
-            (r#"type = "databricks"
+                cache_schema = true"#,
+                true,
+            ),
+            (
+                r#"type = "clickhouse"
+                cache_schema = true"#,
+                true,
+            ),
+            (
+                r#"type = "databricks"
                 host = "h"
                 token = "t"
                 warehouse_id = "w"
-                cache_schema = true"#, true),
+                cache_schema = true"#,
+                true,
+            ),
         ];
         for (body, expected) in cases {
             let toml = format!("[connections.c]\n{body}");
@@ -789,7 +808,9 @@ mod tests {
     fn save_round_trip_snowflake_browser() {
         let c = round_trip(Connection::Snowflake(SnowflakeConnection {
             account: "xy".into(),
-            auth: SnowflakeAuth::Browser { user: "u@e.com".into() },
+            auth: SnowflakeAuth::Browser {
+                user: "u@e.com".into(),
+            },
             database: "D".into(),
             warehouse: None,
             schema: None,

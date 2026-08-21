@@ -11,10 +11,6 @@ pub fn cache_dir() -> PathBuf {
         .join("schemas")
 }
 
-pub fn cache_path(profile_key: &str) -> PathBuf {
-    cache_path_in(&cache_dir(), profile_key)
-}
-
 fn cache_path_in(dir: &Path, profile_key: &str) -> PathBuf {
     dir.join(format!("{}.json", sanitize(profile_key)))
 }
@@ -39,6 +35,7 @@ pub fn save(profile_key: &str, schema: &[SchemaNode]) -> io::Result<()> {
     save_in(&cache_dir(), profile_key, schema)
 }
 
+#[allow(dead_code)] // Cache invalidation API, exercised by tests.
 pub fn delete(profile_key: &str) -> io::Result<()> {
     delete_in(&cache_dir(), profile_key)
 }
@@ -52,8 +49,8 @@ fn load_in(dir: &Path, profile_key: &str) -> Option<Vec<SchemaNode>> {
 fn save_in(dir: &Path, profile_key: &str, schema: &[SchemaNode]) -> io::Result<()> {
     fs::create_dir_all(dir)?;
     let path = cache_path_in(dir, profile_key);
-    let json = serde_json::to_string(schema)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let json =
+        serde_json::to_string(schema).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     fs::write(&path, json)?;
     Ok(())
 }

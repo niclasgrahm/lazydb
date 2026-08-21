@@ -13,9 +13,9 @@ mod status_bar;
 mod theme;
 
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout},
     widgets::Block,
-    Frame,
 };
 
 use crate::app::App;

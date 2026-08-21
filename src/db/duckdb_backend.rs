@@ -1,5 +1,5 @@
-use duckdb::types::ValueRef;
 use duckdb::Connection;
+use duckdb::types::ValueRef;
 
 use super::{Database, ProgressFn, QueryResult, SchemaNode, Value};
 
@@ -41,9 +41,7 @@ impl Database for DuckDb {
                     Ok(ValueRef::HugeInt(i)) => Value::Text(i.to_string()),
                     Ok(ValueRef::Float(f)) => Value::Float(f as f64),
                     Ok(ValueRef::Double(f)) => Value::Float(f),
-                    Ok(ValueRef::Text(s)) => {
-                        Value::Text(String::from_utf8_lossy(s).into_owned())
-                    }
+                    Ok(ValueRef::Text(s)) => Value::Text(String::from_utf8_lossy(s).into_owned()),
                     Ok(_) => Value::Text("<unsupported>".to_string()),
                     Err(e) => Value::Text(format!("<error: {e}>")),
                 };

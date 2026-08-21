@@ -2,12 +2,12 @@ use std::path::PathBuf;
 
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyEventKind};
-use tracing::{debug, error, info};
 use ratatui::{
     layout::Rect,
     style::{Color, Style},
     widgets::ListState,
 };
+use tracing::{debug, error, info};
 use tui_textarea::{Input, TextArea};
 
 use std::collections::{BTreeMap, HashSet};
@@ -15,11 +15,11 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crate::completion::CompletionState;
-use crate::config::{AppConfig, Connection, Profiles};
+use crate::config::{AppConfig, Profiles};
 use crate::db::{self, Database, ProgressFn, QueryResult, SchemaNode};
-use crate::schema_cache;
 use crate::keybindings::{Keybindings, LeaderEntry};
 use crate::recents::{RecentEntry, Recents};
+use crate::schema_cache;
 use crate::tree::TreeNode;
 use crate::vim::{self, Transition, Vim};
 
@@ -95,13 +95,16 @@ pub enum SidebarNodeKind {
 
 pub const RESULTS_PAGE_SIZE: usize = 100;
 
+/// Outcome of a background connect: the live handle, its schema, and how it was obtained.
+pub type ConnectResult = Result<(Box<dyn Database>, Vec<SchemaNode>, ConnectSource), String>;
+
 pub enum BgResult {
     Progress {
         message: String,
     },
     Connected {
         label: String,
-        result: Result<(Box<dyn Database>, Vec<SchemaNode>, ConnectSource), String>,
+        result: ConnectResult,
     },
     SchemaRefreshed {
         label: String,
@@ -187,7 +190,12 @@ pub struct EditorViewport {
 }
 
 impl<'a> App<'a> {
-    pub fn new(config: AppConfig, profiles: Profiles, files_root: Option<PathBuf>, initial_query: Option<String>) -> Self {
+    pub fn new(
+        config: AppConfig,
+        profiles: Profiles,
+        files_root: Option<PathBuf>,
+        initial_query: Option<String>,
+    ) -> Self {
         let (sidebar_items, label_to_profile) = build_sidebar_tree(&profiles);
 
         let mut state = ListState::default();
@@ -275,6 +283,7 @@ impl<'a> App<'a> {
         });
     }
 
+    #[allow(dead_code)] // Info counterpart of `show_error`; part of the message API.
     pub fn show_info(&mut self, text: impl Into<String>) {
         self.message = Some(Message {
             text: text.into(),
@@ -285,11 +294,19 @@ impl<'a> App<'a> {
     /// Returns the ordered list of currently visible focus targets.
     fn visible_panes(&self) -> Vec<Focus> {
         let mut panes = Vec::new();
-        if self.show_sidebar { panes.push(Focus::Sidebar); }
-        if self.show_files { panes.push(Focus::Files); }
+        if self.show_sidebar {
+            panes.push(Focus::Sidebar);
+        }
+        if self.show_files {
+            panes.push(Focus::Files);
+        }
         panes.push(Focus::QueryEditor); // always visible
-        if self.results_visible { panes.push(Focus::Results); }
-        if self.show_recent { panes.push(Focus::Recent); }
+        if self.results_visible {
+            panes.push(Focus::Results);
+        }
+        if self.show_recent {
+            panes.push(Focus::Recent);
+        }
         panes
     }
 
@@ -328,7 +345,8 @@ impl<'a> App<'a> {
 
     pub fn sql_preview(&self) -> String {
         let source = self.editor.lines().join("\n");
-        self.query_language.transpile(&source)
+        self.query_language
+            .transpile(&source)
             .unwrap_or_else(|e| format!("-- PRQL error\n{e}"))
     }
 
@@ -382,7 +400,9 @@ impl<'a> App<'a> {
     }
 
     fn run_paged_query(&mut self) {
-        let Some(query) = &self.results_query else { return };
+        let Some(query) = &self.results_query else {
+            return;
+        };
         let Some(mut conn) = self.connection.take() else {
             self.show_error("No database connected");
             return;
@@ -485,8 +505,8 @@ impl<'a> App<'a> {
                 return Ok(());
             }
 
-            let in_normal = !matches!(self.focus, Focus::QueryEditor)
-                || self.vim.mode == vim::Mode::Normal;
+            let in_normal =
+                !matches!(self.focus, Focus::QueryEditor) || self.vim.mode == vim::Mode::Normal;
 
             // Leader key dispatch: if leader is active, handle the action key
             if self.leader_active {
@@ -599,45 +619,99 @@ impl<'a> App<'a> {
         let mut actions = Vec::new();
         match self.focus {
             Focus::QueryEditor => {
-                actions.push(LeaderEntry { key: 'e', label: "Execute query" });
-                actions.push(LeaderEntry { key: 'f', label: "Format query" });
-                actions.push(LeaderEntry { key: 'l', label: "Switch language" });
-                actions.push(LeaderEntry { key: 'p', label: "Toggle SQL preview" });
+                actions.push(LeaderEntry {
+                    key: 'e',
+                    label: "Execute query",
+                });
+                actions.push(LeaderEntry {
+                    key: 'f',
+                    label: "Format query",
+                });
+                actions.push(LeaderEntry {
+                    key: 'l',
+                    label: "Switch language",
+                });
+                actions.push(LeaderEntry {
+                    key: 'p',
+                    label: "Toggle SQL preview",
+                });
             }
             Focus::Sidebar => {
                 let kind = self.sidebar_node_kind();
                 match kind {
                     SidebarNodeKind::Connection => {
                         if self.connected_db.is_some() {
-                            actions.push(LeaderEntry { key: 'd', label: "Disconnect" });
+                            actions.push(LeaderEntry {
+                                key: 'd',
+                                label: "Disconnect",
+                            });
                         } else {
-                            actions.push(LeaderEntry { key: 'o', label: "Connect" });
+                            actions.push(LeaderEntry {
+                                key: 'o',
+                                label: "Connect",
+                            });
                         }
                     }
                     SidebarNodeKind::TableOrView => {
-                        actions.push(LeaderEntry { key: 's', label: "Preview table" });
+                        actions.push(LeaderEntry {
+                            key: 's',
+                            label: "Preview table",
+                        });
                     }
                     SidebarNodeKind::Other => {}
                 }
-                actions.push(LeaderEntry { key: 'e', label: "Execute query" });
+                actions.push(LeaderEntry {
+                    key: 'e',
+                    label: "Execute query",
+                });
             }
             Focus::Results => {
-                actions.push(LeaderEntry { key: 'c', label: "Close results" });
-                actions.push(LeaderEntry { key: 'e', label: "Execute query" });
+                actions.push(LeaderEntry {
+                    key: 'c',
+                    label: "Close results",
+                });
+                actions.push(LeaderEntry {
+                    key: 'e',
+                    label: "Execute query",
+                });
             }
             Focus::Files => {
-                actions.push(LeaderEntry { key: 'e', label: "Execute query" });
+                actions.push(LeaderEntry {
+                    key: 'e',
+                    label: "Execute query",
+                });
             }
             Focus::Recent => {
-                actions.push(LeaderEntry { key: 'd', label: "Delete recent" });
-                actions.push(LeaderEntry { key: 'e', label: "Execute query" });
+                actions.push(LeaderEntry {
+                    key: 'd',
+                    label: "Delete recent",
+                });
+                actions.push(LeaderEntry {
+                    key: 'e',
+                    label: "Execute query",
+                });
             }
         }
-        actions.push(LeaderEntry { key: '1', label: "Toggle connections" });
-        actions.push(LeaderEntry { key: '2', label: "Toggle files" });
-        actions.push(LeaderEntry { key: '3', label: "Toggle recent" });
-        actions.push(LeaderEntry { key: 'h', label: "Help" });
-        actions.push(LeaderEntry { key: 'q', label: "Quit" });
+        actions.push(LeaderEntry {
+            key: '1',
+            label: "Toggle connections",
+        });
+        actions.push(LeaderEntry {
+            key: '2',
+            label: "Toggle files",
+        });
+        actions.push(LeaderEntry {
+            key: '3',
+            label: "Toggle recent",
+        });
+        actions.push(LeaderEntry {
+            key: 'h',
+            label: "Help",
+        });
+        actions.push(LeaderEntry {
+            key: 'q',
+            label: "Quit",
+        });
         actions
     }
 
@@ -665,11 +739,11 @@ impl<'a> App<'a> {
                 // Connect: activate the selected connection node
                 if let Some(selected) = self.sidebar_state.selected() {
                     let flat = self.filtered_flat_nodes();
-                    if let Some(node) = flat.get(selected) {
-                        if node.depth == 0 {
-                            self.sidebar_filter.clear();
-                            self.toggle_connection(node.flat_index);
-                        }
+                    if let Some(node) = flat.get(selected)
+                        && node.depth == 0
+                    {
+                        self.sidebar_filter.clear();
+                        self.toggle_connection(node.flat_index);
                     }
                 }
             }
@@ -678,17 +752,17 @@ impl<'a> App<'a> {
                     // Disconnect
                     if let Some(selected) = self.sidebar_state.selected() {
                         let flat = self.filtered_flat_nodes();
-                        if let Some(node) = flat.get(selected) {
-                            if node.depth == 0 {
-                                self.sidebar_filter.clear();
-                                self.toggle_connection(node.flat_index);
-                            }
+                        if let Some(node) = flat.get(selected)
+                            && node.depth == 0
+                        {
+                            self.sidebar_filter.clear();
+                            self.toggle_connection(node.flat_index);
                         }
                     }
                 }
                 Focus::Recent => self.delete_selected_recent(),
                 _ => {}
-            }
+            },
             'c' => {
                 self.results_visible = false;
                 self.focus = Focus::QueryEditor;
@@ -788,38 +862,39 @@ impl<'a> App<'a> {
                 self.sidebar_state.select(Some(selected + 1));
             }
         } else if kb.activate.matches(key) {
-            if let Some(selected) = self.sidebar_state.selected() {
-                if let Some(node) = flat.get(selected) {
-                    let real_idx = node.flat_index;
-                    let is_connection = node.depth == 0;
-                    if is_connection {
-                        self.sidebar_filter.clear();
-                        self.toggle_connection(real_idx);
-                    } else {
-                        TreeNode::toggle_at_index(&mut self.sidebar_items, real_idx);
-                    }
+            if let Some(selected) = self.sidebar_state.selected()
+                && let Some(node) = flat.get(selected)
+            {
+                let real_idx = node.flat_index;
+                let is_connection = node.depth == 0;
+                if is_connection {
+                    self.sidebar_filter.clear();
+                    self.toggle_connection(real_idx);
+                } else {
+                    TreeNode::toggle_at_index(&mut self.sidebar_items, real_idx);
                 }
             }
         } else if kb.expand.matches(key) {
-            if let Some(selected) = self.sidebar_state.selected() {
-                if let Some(node) = flat.get(selected) {
-                    TreeNode::toggle_at_index(&mut self.sidebar_items, node.flat_index);
-                }
+            if let Some(selected) = self.sidebar_state.selected()
+                && let Some(node) = flat.get(selected)
+            {
+                TreeNode::toggle_at_index(&mut self.sidebar_items, node.flat_index);
             }
         } else if kb.collapse.matches(key) {
-            if let Some(selected) = self.sidebar_state.selected() {
-                if let Some(node) = flat.get(selected) {
-                    TreeNode::collapse_at_index(&mut self.sidebar_items, node.flat_index);
-                }
+            if let Some(selected) = self.sidebar_state.selected()
+                && let Some(node) = flat.get(selected)
+            {
+                TreeNode::collapse_at_index(&mut self.sidebar_items, node.flat_index);
             }
         } else if kb.preview.matches(key) {
             if let Some(selected) = self.sidebar_state.selected() {
                 self.preview_table(selected);
             }
-        } else if kb.refresh_schema.matches(key) {
-            if self.connected_db.is_some() && self.connection.is_some() {
-                self.refresh_schema();
-            }
+        } else if kb.refresh_schema.matches(key)
+            && self.connected_db.is_some()
+            && self.connection.is_some()
+        {
+            self.refresh_schema();
         }
     }
 
@@ -840,13 +915,20 @@ impl<'a> App<'a> {
         // Check if all columns fit at current scroll position
         let all_cols_visible = if let Some(r) = result {
             let inner_width = (area.width.saturating_sub(2)) as usize;
-            let widths: Vec<usize> = r.columns.iter().enumerate().map(|(i, col)| {
-                let max_data = r.rows.iter()
-                    .map(|row| row.get(i).map(|v| v.to_string().len()).unwrap_or(0))
-                    .max()
-                    .unwrap_or(0);
-                col.len().max(max_data).max(1)
-            }).collect();
+            let widths: Vec<usize> = r
+                .columns
+                .iter()
+                .enumerate()
+                .map(|(i, col)| {
+                    let max_data = r
+                        .rows
+                        .iter()
+                        .map(|row| row.get(i).map(|v| v.to_string().len()).unwrap_or(0))
+                        .max()
+                        .unwrap_or(0);
+                    col.len().max(max_data).max(1)
+                })
+                .collect();
             // Check if all columns from scroll_col onward fit
             let mut used = 0;
             let mut fits = true;
@@ -955,41 +1037,36 @@ impl<'a> App<'a> {
                 self.file_tree_state.select(Some(selected + 1));
             }
         } else if kb.activate.matches(key) {
-            if let Some(selected) = self.file_tree_state.selected() {
-                if let Some(node) = flat.get(selected) {
-                    if node.has_children {
-                        self.files_expand_or_toggle(node.flat_index);
-                    } else {
-                        self.files_open_file(node.flat_index);
-                    }
+            if let Some(selected) = self.file_tree_state.selected()
+                && let Some(node) = flat.get(selected)
+            {
+                if node.has_children {
+                    self.files_expand_or_toggle(node.flat_index);
+                } else {
+                    self.files_open_file(node.flat_index);
                 }
             }
         } else if kb.expand.matches(key) {
-            if let Some(selected) = self.file_tree_state.selected() {
-                if let Some(node) = flat.get(selected) {
-                    if node.has_children && !node.expanded {
-                        self.files_expand_or_toggle(node.flat_index);
-                    }
-                }
+            if let Some(selected) = self.file_tree_state.selected()
+                && let Some(node) = flat.get(selected)
+                && node.has_children
+                && !node.expanded
+            {
+                self.files_expand_or_toggle(node.flat_index);
             }
-        } else if kb.collapse.matches(key) {
-            if let Some(selected) = self.file_tree_state.selected() {
-                if let Some(node) = flat.get(selected) {
-                    TreeNode::collapse_at_index(&mut self.file_tree, node.flat_index);
-                    self.rebuild_file_paths();
-                }
-            }
+        } else if kb.collapse.matches(key)
+            && let Some(selected) = self.file_tree_state.selected()
+            && let Some(node) = flat.get(selected)
+        {
+            TreeNode::collapse_at_index(&mut self.file_tree, node.flat_index);
+            self.rebuild_file_paths();
         }
     }
 
     fn files_expand_or_toggle(&mut self, flat_index: usize) {
         // Lazy-populate if sentinel
         if crate::files::is_sentinel(&self.file_tree, flat_index) {
-            crate::files::populate_children(
-                &mut self.file_tree,
-                flat_index,
-                &self.file_paths,
-            );
+            crate::files::populate_children(&mut self.file_tree, flat_index, &self.file_paths);
         }
         TreeNode::toggle_at_index(&mut self.file_tree, flat_index);
         self.rebuild_file_paths();
@@ -1030,8 +1107,8 @@ impl<'a> App<'a> {
         use crossterm::event::KeyCode;
         if key.code == KeyCode::Char('j') || key.code == KeyCode::Down {
             if !self.recents.entries.is_empty() {
-                self.recents_selected = (self.recents_selected + 1)
-                    .min(self.recents.entries.len() - 1);
+                self.recents_selected =
+                    (self.recents_selected + 1).min(self.recents.entries.len() - 1);
                 self.load_recent_into_results();
             }
         } else if key.code == KeyCode::Char('k') || key.code == KeyCode::Up {
@@ -1039,17 +1116,17 @@ impl<'a> App<'a> {
             if !self.recents.entries.is_empty() {
                 self.load_recent_into_results();
             }
-        } else if key.code == KeyCode::Enter {
-            if let Some(entry) = self.recents.entries.get(self.recents_selected) {
-                let lines: Vec<&str> = entry.query.lines().collect();
-                self.editor = TextArea::new(lines.into_iter().map(String::from).collect());
-                self.editor.set_cursor_line_style(Style::default());
-                self.focus = Focus::QueryEditor;
-                self.vim = Vim::new(vim::Mode::Normal);
-                // Recent queries are always SQL (stored post-transpilation)
-                self.query_language = QueryLanguage::Sql;
-                self.show_sql_preview = false;
-            }
+        } else if key.code == KeyCode::Enter
+            && let Some(entry) = self.recents.entries.get(self.recents_selected)
+        {
+            let lines: Vec<&str> = entry.query.lines().collect();
+            self.editor = TextArea::new(lines.into_iter().map(String::from).collect());
+            self.editor.set_cursor_line_style(Style::default());
+            self.focus = Focus::QueryEditor;
+            self.vim = Vim::new(vim::Mode::Normal);
+            // Recent queries are always SQL (stored post-transpilation)
+            self.query_language = QueryLanguage::Sql;
+            self.show_sql_preview = false;
         }
     }
 
@@ -1081,7 +1158,9 @@ impl<'a> App<'a> {
 
     fn toggle_connection(&mut self, flat_index: usize) {
         let flat = TreeNode::flatten_all(&self.sidebar_items);
-        let Some(node) = flat.get(flat_index) else { return };
+        let Some(node) = flat.get(flat_index) else {
+            return;
+        };
         let label = node.label.clone();
 
         if self.connected_db.as_ref() == Some(&label) {
@@ -1137,7 +1216,9 @@ impl<'a> App<'a> {
                     let progress: Box<ProgressFn> = {
                         let tx = tx_progress;
                         Box::new(move |msg: &str| {
-                            let _ = tx.send(BgResult::Progress { message: msg.into() });
+                            let _ = tx.send(BgResult::Progress {
+                                message: msg.into(),
+                            });
                         })
                     };
 
@@ -1169,13 +1250,11 @@ impl<'a> App<'a> {
         }
     }
 
-    fn connect_profile(profile: &Connection) -> Result<Box<dyn Database>, String> {
-        profile.connect()
-    }
-
     fn preview_table(&mut self, flat_pos: usize) {
         let flat = self.filtered_flat_nodes();
-        let Some(node) = flat.get(flat_pos) else { return };
+        let Some(node) = flat.get(flat_pos) else {
+            return;
+        };
 
         // Collect ancestors by walking backwards in the filtered list.
         // The filtered list always includes ancestors of matching nodes, so this
@@ -1194,7 +1273,10 @@ impl<'a> App<'a> {
 
         // Ancestors are in reverse order (innermost first): [Tables/Views, schema, database, connection]
         // Check that the immediate parent is "Tables" or "Views"
-        if !matches!(ancestors.first().map(|s| s.as_ref()), Some("Tables" | "Views")) {
+        if !matches!(
+            ancestors.first().map(|s| s.as_ref()),
+            Some("Tables" | "Views")
+        ) {
             return;
         }
 
@@ -1202,7 +1284,9 @@ impl<'a> App<'a> {
         // ancestors = [Tables/Views, ...intermediate levels..., connection]
         let table_name = node.label.as_str();
         let connection_label = ancestors.last().copied().unwrap_or(table_name);
-        let conn_type = self.label_to_profile.get(connection_label)
+        let conn_type = self
+            .label_to_profile
+            .get(connection_label)
             .and_then(|k| self.profiles.connections.get(k))
             .map(|c| c.type_name());
 
@@ -1276,14 +1360,12 @@ impl<'a> App<'a> {
                         );
                         // Persist freshly-fetched schemas if the profile opts in.
                         if matches!(source, ConnectSource::Live) {
-                            if let Some(profile_key) = self.label_to_profile.get(&label).cloned() {
-                                if let Some(profile) = self.profiles.connections.get(&profile_key) {
-                                    if profile.cache_schema() {
-                                        if let Err(e) = schema_cache::save(&profile_key, &schema) {
-                                            debug!(error = %e, "failed to persist schema cache");
-                                        }
-                                    }
-                                }
+                            if let Some(profile_key) = self.label_to_profile.get(&label).cloned()
+                                && let Some(profile) = self.profiles.connections.get(&profile_key)
+                                && profile.cache_schema()
+                                && let Err(e) = schema_cache::save(&profile_key, &schema)
+                            {
+                                debug!(error = %e, "failed to persist schema cache");
                             }
                             self.cached_connections.remove(&label);
                         }
@@ -1304,21 +1386,23 @@ impl<'a> App<'a> {
                     }
                 }
             }
-            BgResult::SchemaRefreshed { label, conn, result } => {
+            BgResult::SchemaRefreshed {
+                label,
+                conn,
+                result,
+            } => {
                 self.loading = None;
                 self.bg_receiver = None;
                 self.connection = Some(conn);
                 match result {
                     Ok(schema) => {
                         info!(label = %label, schema_nodes = schema.len(), "schema refreshed");
-                        if let Some(profile_key) = self.label_to_profile.get(&label).cloned() {
-                            if let Some(profile) = self.profiles.connections.get(&profile_key) {
-                                if profile.cache_schema() {
-                                    if let Err(e) = schema_cache::save(&profile_key, &schema) {
-                                        debug!(error = %e, "failed to persist schema cache");
-                                    }
-                                }
-                            }
+                        if let Some(profile_key) = self.label_to_profile.get(&label).cloned()
+                            && let Some(profile) = self.profiles.connections.get(&profile_key)
+                            && profile.cache_schema()
+                            && let Err(e) = schema_cache::save(&profile_key, &schema)
+                        {
+                            debug!(error = %e, "failed to persist schema cache");
                         }
                         self.cached_connections.remove(&label);
                         self.populate_schema(&label, schema);
@@ -1349,12 +1433,11 @@ impl<'a> App<'a> {
                         self.focus = Focus::Results;
                         self.save_recent_entry(None);
                         // Refresh schema after DDL/DML that may have changed it
-                        if !has_more {
-                            if let Some(q) = &self.results_query {
-                                if !query_is_select(q) {
-                                    self.refresh_schema();
-                                }
-                            }
+                        if !has_more
+                            && let Some(q) = &self.results_query
+                            && !query_is_select(q)
+                        {
+                            self.refresh_schema();
                         }
                     }
                     Err(e) => {
@@ -1371,7 +1454,9 @@ impl<'a> App<'a> {
     fn save_recent_entry(&mut self, error: Option<String>) {
         use std::time::{SystemTime, UNIX_EPOCH};
 
-        let Some(query) = &self.results_query else { return };
+        let Some(query) = &self.results_query else {
+            return;
+        };
 
         let entry = RecentEntry {
             query: query.clone(),
@@ -1380,10 +1465,15 @@ impl<'a> App<'a> {
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs(),
-            duration_ms: self.query_duration
+            duration_ms: self
+                .query_duration
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0),
-            result: if error.is_none() { self.query_result.clone() } else { None },
+            result: if error.is_none() {
+                self.query_result.clone()
+            } else {
+                None
+            },
             error,
         };
         self.recents.add(entry, self.max_recents);
@@ -1394,8 +1484,12 @@ impl<'a> App<'a> {
     /// connected database. The connection is moved into the thread and
     /// returned via `BgResult::SchemaRefreshed`.
     fn refresh_schema(&mut self) {
-        let Some(label) = self.connected_db.clone() else { return };
-        let Some(conn) = self.connection.take() else { return };
+        let Some(label) = self.connected_db.clone() else {
+            return;
+        };
+        let Some(conn) = self.connection.take() else {
+            return;
+        };
         debug!(label = %label, "refreshing schema tree");
 
         let (tx, rx) = mpsc::channel();
@@ -1410,7 +1504,9 @@ impl<'a> App<'a> {
             let progress: Box<ProgressFn> = {
                 let tx = tx_progress;
                 Box::new(move |msg: &str| {
-                    let _ = tx.send(BgResult::Progress { message: msg.into() });
+                    let _ = tx.send(BgResult::Progress {
+                        message: msg.into(),
+                    });
                 })
             };
             let result = conn.schema_tree(&progress);
@@ -1437,7 +1533,8 @@ impl<'a> App<'a> {
                 break;
             }
         }
-        self.schema_raw.insert(connection_label.to_string(), schema_nodes);
+        self.schema_raw
+            .insert(connection_label.to_string(), schema_nodes);
     }
 
     fn clear_schema(&mut self, connection_label: &str) {
@@ -1559,8 +1656,7 @@ impl<'a> App<'a> {
 
     fn handle_leader_key_press(&mut self) {
         // Simulate pressing the leader key in a normal-mode context
-        let in_normal = self.focus != Focus::QueryEditor
-            || self.vim.mode == vim::Mode::Normal;
+        let in_normal = self.focus != Focus::QueryEditor || self.vim.mode == vim::Mode::Normal;
         if in_normal {
             self.leader_active = true;
         }
@@ -1582,13 +1678,11 @@ fn strip_trailing_semicolons(sql: &str) -> &str {
 /// and can be wrapped in a paging subquery.
 fn query_is_select(sql: &str) -> bool {
     let trimmed = sql.trim_start();
-    // Strip leading CTEs: WITH ... SELECT
-    let s = if trimmed.len() >= 4 && trimmed[..4].eq_ignore_ascii_case("with") {
-        trimmed
-    } else {
-        trimmed
-    };
-    let upper_start: String = s.chars().take(10).collect::<String>().to_ascii_uppercase();
+    let upper_start: String = trimmed
+        .chars()
+        .take(10)
+        .collect::<String>()
+        .to_ascii_uppercase();
     upper_start.starts_with("SELECT")
         || upper_start.starts_with("WITH")
         || upper_start.starts_with("TABLE ")
@@ -1612,6 +1706,7 @@ fn build_sidebar_tree(profiles: &Profiles) -> (Vec<TreeNode>, BTreeMap<String, S
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Connection;
     use crate::config::{DuckDbConnection, PostgresConnection};
     use crate::db::{MockDatabase, SchemaNode};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -1648,10 +1743,6 @@ mod tests {
         KeyEvent::new(code, KeyModifiers::empty())
     }
 
-    fn key_mod(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
-        KeyEvent::new(code, modifiers)
-    }
-
     // --- Initialization ---
 
     #[test]
@@ -1678,7 +1769,10 @@ mod tests {
         assert_eq!(nodes[0].label, "pgdb (postgres)");
         assert_eq!(nodes[1].label, "testdb (duckdb)");
         assert_eq!(label_map.get("pgdb (postgres)"), Some(&"pgdb".to_string()));
-        assert_eq!(label_map.get("testdb (duckdb)"), Some(&"testdb".to_string()));
+        assert_eq!(
+            label_map.get("testdb (duckdb)"),
+            Some(&"testdb".to_string())
+        );
     }
 
     // --- Focus cycling ---
@@ -1833,10 +1927,10 @@ mod tests {
     fn app_with_file_tree() -> App<'static> {
         let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.file_tree = vec![
-            TreeNode::folder("src", vec![
-                TreeNode::leaf("main.sql"),
-                TreeNode::leaf("queries.sql"),
-            ]),
+            TreeNode::folder(
+                "src",
+                vec![TreeNode::leaf("main.sql"), TreeNode::leaf("queries.sql")],
+            ),
             TreeNode::leaf("README.md"),
         ];
         app.file_tree_state.select(Some(0));
@@ -1999,12 +2093,10 @@ mod tests {
     fn populate_schema_adds_children() {
         let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         let label = &app.sidebar_items[0].label.clone();
-        let schema = vec![
-            SchemaNode::group("Tables", vec![
-                SchemaNode::leaf("users"),
-                SchemaNode::leaf("orders"),
-            ]),
-        ];
+        let schema = vec![SchemaNode::group(
+            "Tables",
+            vec![SchemaNode::leaf("users"), SchemaNode::leaf("orders")],
+        )];
         app.populate_schema(label, schema);
         assert_eq!(app.sidebar_items[0].children.len(), 1);
         assert_eq!(app.sidebar_items[0].children[0].label, "Tables");
@@ -2032,15 +2124,19 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         app.set_bg_receiver(rx);
 
-        let mock = MockDatabase::new().with_schema(vec![
-            SchemaNode::group("Tables", vec![SchemaNode::leaf("users")]),
-        ]);
+        let mock = MockDatabase::new().with_schema(vec![SchemaNode::group(
+            "Tables",
+            vec![SchemaNode::leaf("users")],
+        )]);
         tx.send(BgResult::Connected {
             label: label.clone(),
-            result: Ok((Box::new(mock), vec![
-                SchemaNode::group("Tables", vec![SchemaNode::leaf("users")]),
-            ], ConnectSource::Live)),
-        }).unwrap();
+            result: Ok((
+                Box::new(mock),
+                vec![SchemaNode::group("Tables", vec![SchemaNode::leaf("users")])],
+                ConnectSource::Live,
+            )),
+        })
+        .unwrap();
 
         app.poll_background();
         assert_eq!(app.connected_db, Some(label));
@@ -2059,7 +2155,8 @@ mod tests {
         tx.send(BgResult::Connected {
             label,
             result: Err("connection refused".into()),
-        }).unwrap();
+        })
+        .unwrap();
 
         app.poll_background();
         assert!(app.connected_db.is_none());
@@ -2081,7 +2178,8 @@ mod tests {
         tx.send(BgResult::Query {
             conn: Box::new(mock),
             result: Ok((result, Duration::from_millis(42), false)),
-        }).unwrap();
+        })
+        .unwrap();
 
         app.poll_background();
         assert!(app.query_result.is_some());
@@ -2207,7 +2305,10 @@ mod tests {
         app.handle_leader_action(&key(KeyCode::Char('l'))); // → PRQL
         app.editor.insert_str("from employees | select {name}");
         let preview = app.sql_preview();
-        assert!(!preview.contains("-- PRQL error"), "expected valid SQL, got: {preview}");
+        assert!(
+            !preview.contains("-- PRQL error"),
+            "expected valid SQL, got: {preview}"
+        );
         assert!(preview.to_lowercase().contains("select"));
     }
 
@@ -2218,7 +2319,10 @@ mod tests {
         app.handle_leader_action(&key(KeyCode::Char('l'))); // → PRQL
         app.editor.insert_str("this is not valid prql !!!");
         let preview = app.sql_preview();
-        assert!(preview.contains("-- PRQL error"), "expected error comment, got: {preview}");
+        assert!(
+            preview.contains("-- PRQL error"),
+            "expected error comment, got: {preview}"
+        );
     }
 
     #[test]
@@ -2237,8 +2341,14 @@ mod tests {
         let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::Sidebar;
         let actions = app.leader_actions();
-        assert!(!actions.iter().any(|a| a.key == 'l'), "no switch language in sidebar");
-        assert!(!actions.iter().any(|a| a.key == 'p'), "no preview toggle in sidebar");
+        assert!(
+            !actions.iter().any(|a| a.key == 'l'),
+            "no switch language in sidebar"
+        );
+        assert!(
+            !actions.iter().any(|a| a.key == 'p'),
+            "no preview toggle in sidebar"
+        );
     }
 
     #[test]
@@ -2248,7 +2358,10 @@ mod tests {
         // Default selection is index 0, which is a connection node (depth 0)
         let actions = app.leader_actions();
         assert!(actions.iter().any(|a| a.key == 'o'), "connect");
-        assert!(!actions.iter().any(|a| a.key == 's'), "no preview on connection");
+        assert!(
+            !actions.iter().any(|a| a.key == 's'),
+            "no preview on connection"
+        );
         assert!(actions.iter().any(|a| a.key == 'e'), "execute");
         assert!(actions.iter().any(|a| a.key == 'h'), "help");
     }
@@ -2259,11 +2372,10 @@ mod tests {
         app.focus = Focus::Sidebar;
         // Populate schema so we have table nodes
         let label = app.sidebar_items[0].label.clone();
-        app.populate_schema(&label, vec![
-            SchemaNode::group("Tables", vec![
-                SchemaNode::leaf("users"),
-            ]),
-        ]);
+        app.populate_schema(
+            &label,
+            vec![SchemaNode::group("Tables", vec![SchemaNode::leaf("users")])],
+        );
         // Expand the connection and Tables folder to make "users" visible
         app.sidebar_items[0].expanded = true;
         app.sidebar_items[0].children[0].expanded = true;
@@ -2272,7 +2384,10 @@ mod tests {
         let actions = app.leader_actions();
         assert!(actions.iter().any(|a| a.key == 's'), "preview on table");
         assert!(!actions.iter().any(|a| a.key == 'o'), "no connect on table");
-        assert!(!actions.iter().any(|a| a.key == 'd'), "no disconnect on table");
+        assert!(
+            !actions.iter().any(|a| a.key == 'd'),
+            "no disconnect on table"
+        );
     }
 
     #[test]
@@ -2282,11 +2397,10 @@ mod tests {
         let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::Sidebar;
         let label = app.sidebar_items[0].label.clone();
-        app.populate_schema(&label, vec![
-            SchemaNode::group("Tables", vec![
-                SchemaNode::leaf("users"),
-            ]),
-        ]);
+        app.populate_schema(
+            &label,
+            vec![SchemaNode::group("Tables", vec![SchemaNode::leaf("users")])],
+        );
         // Connection is expanded but Tables is NOT expanded (collapsed)
         app.sidebar_items[0].expanded = true;
         // app.sidebar_items[0].children[0].expanded stays false
@@ -2297,18 +2411,27 @@ mod tests {
 
         // The filtered list should show: Connection(0), Tables(1), users(2)
         let flat = app.filtered_flat_nodes();
-        let users_pos = flat.iter().position(|n| n.label == "users").expect("users in filtered list");
+        let users_pos = flat
+            .iter()
+            .position(|n| n.label == "users")
+            .expect("users in filtered list");
         app.sidebar_state.select(Some(users_pos));
 
         // leader_actions must include 's'
         let actions = app.leader_actions();
-        assert!(actions.iter().any(|a| a.key == 's'), "preview action should be available with filter active");
+        assert!(
+            actions.iter().any(|a| a.key == 's'),
+            "preview action should be available with filter active"
+        );
 
         // leader+s must insert the preview query into the editor
         app.leader_active = true;
         app.handle_leader_action(&key(KeyCode::Char('s')));
         let editor_text: String = app.editor.lines().join("\n");
-        assert!(editor_text.contains("users"), "expected preview query with 'users', got: {editor_text:?}");
+        assert!(
+            editor_text.contains("users"),
+            "expected preview query with 'users', got: {editor_text:?}"
+        );
         assert_eq!(app.focus, Focus::QueryEditor);
     }
 
@@ -2317,19 +2440,30 @@ mod tests {
         let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
         app.focus = Focus::Sidebar;
         let label = app.sidebar_items[0].label.clone();
-        app.populate_schema(&label, vec![
-            SchemaNode::group("Tables", vec![
-                SchemaNode::leaf("users"),
-            ]),
-        ]);
+        app.populate_schema(
+            &label,
+            vec![SchemaNode::group("Tables", vec![SchemaNode::leaf("users")])],
+        );
         app.sidebar_items[0].expanded = true;
         // Select the "Tables" folder (flat index 1)
         app.sidebar_state.select(Some(1));
         let actions = app.leader_actions();
-        assert!(!actions.iter().any(|a| a.key == 's'), "no preview on folder");
-        assert!(!actions.iter().any(|a| a.key == 'o'), "no connect on folder");
-        assert!(actions.iter().any(|a| a.key == 'e'), "execute always available");
-        assert!(actions.iter().any(|a| a.key == 'h'), "help always available");
+        assert!(
+            !actions.iter().any(|a| a.key == 's'),
+            "no preview on folder"
+        );
+        assert!(
+            !actions.iter().any(|a| a.key == 'o'),
+            "no connect on folder"
+        );
+        assert!(
+            actions.iter().any(|a| a.key == 'e'),
+            "execute always available"
+        );
+        assert!(
+            actions.iter().any(|a| a.key == 'h'),
+            "help always available"
+        );
     }
 
     #[test]
@@ -2338,8 +2472,14 @@ mod tests {
         app.focus = Focus::Sidebar;
         app.connected_db = Some(app.sidebar_items[0].label.clone());
         let actions = app.leader_actions();
-        assert!(actions.iter().any(|a| a.key == 'd'), "disconnect when connected");
-        assert!(!actions.iter().any(|a| a.key == 'o'), "no connect when already connected");
+        assert!(
+            actions.iter().any(|a| a.key == 'd'),
+            "disconnect when connected"
+        );
+        assert!(
+            !actions.iter().any(|a| a.key == 'o'),
+            "no connect when already connected"
+        );
     }
 
     #[test]
@@ -2633,13 +2773,16 @@ mod tests {
         app.show_recent = true;
         app.results_visible = true;
         let panes = app.visible_panes();
-        assert_eq!(panes, vec![
-            Focus::Sidebar,
-            Focus::Files,
-            Focus::QueryEditor,
-            Focus::Results,
-            Focus::Recent,
-        ]);
+        assert_eq!(
+            panes,
+            vec![
+                Focus::Sidebar,
+                Focus::Files,
+                Focus::QueryEditor,
+                Focus::Results,
+                Focus::Recent,
+            ]
+        );
     }
 
     // --- Recents pane tests ---
@@ -2853,14 +2996,20 @@ mod files_tests {
     #[test]
     fn files_enter_rejects_non_text_file() {
         let dir = tempdir().unwrap();
-        fs::write(dir.path().join("data.bin"), &[0u8, 1, 2, 3]).unwrap();
+        fs::write(dir.path().join("data.bin"), [0u8, 1, 2, 3]).unwrap();
 
         let mut app = app_with_files(dir.path().to_path_buf());
         app.focus = Focus::Files;
 
         app.handle_files_key(&KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(app.message.is_some());
-        assert!(app.message.as_ref().unwrap().text.contains("Not a text file"));
+        assert!(
+            app.message
+                .as_ref()
+                .unwrap()
+                .text
+                .contains("Not a text file")
+        );
         assert_eq!(app.focus, Focus::Files);
     }
 
@@ -2904,4 +3053,3 @@ mod files_tests {
         assert!(panes.contains(&Focus::Files));
     }
 }
-
