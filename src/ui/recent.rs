@@ -1,9 +1,9 @@
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, List, ListItem, ListState, Padding},
-    Frame,
 };
 
 use crate::app::{App, Focus};
@@ -60,7 +60,7 @@ pub fn draw(app: &App, frame: &mut Frame, area: Rect) {
             ListItem::new(vec![
                 Line::from(Span::styled(query_preview, query_style)),
                 Line::from(vec![
-                    Span::styled(format!("{conn}"), meta_style),
+                    Span::styled(conn.to_string(), meta_style),
                     Span::styled(format!(" · {time}{error_marker}"), meta_style),
                 ]),
             ])

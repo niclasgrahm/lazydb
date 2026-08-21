@@ -118,7 +118,9 @@ mod tests {
     #[test]
     fn serialize_roundtrip_success() {
         let entry = make_entry("SELECT * FROM users", true, None);
-        let recents = Recents { entries: vec![entry] };
+        let recents = Recents {
+            entries: vec![entry],
+        };
         let json = serde_json::to_string(&recents).unwrap();
         let back: Recents = serde_json::from_str(&json).unwrap();
         assert_eq!(back.entries.len(), 1);
@@ -130,7 +132,9 @@ mod tests {
     #[test]
     fn serialize_roundtrip_error() {
         let entry = make_entry("BAD SQL", false, Some("syntax error"));
-        let recents = Recents { entries: vec![entry] };
+        let recents = Recents {
+            entries: vec![entry],
+        };
         let json = serde_json::to_string(&recents).unwrap();
         let back: Recents = serde_json::from_str(&json).unwrap();
         assert_eq!(back.entries[0].error.as_deref(), Some("syntax error"));

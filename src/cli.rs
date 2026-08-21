@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use color_eyre::eyre::{Context, bail};
 use color_eyre::Result;
+use color_eyre::eyre::{Context, bail};
 
 use crate::config::{
     ClickHouseConnection, Connection, DatabricksConnection, DuckDbConnection, PostgresConnection,
@@ -177,7 +177,13 @@ fn prompt_unique_name(profiles: &Profiles) -> Result<String> {
 }
 
 fn prompt_connection() -> Result<Connection> {
-    const TYPES: &[&str] = &["duckdb", "postgres", "clickhouse", "snowflake", "databricks"];
+    const TYPES: &[&str] = &[
+        "duckdb",
+        "postgres",
+        "clickhouse",
+        "snowflake",
+        "databricks",
+    ];
     let idx = Select::new()
         .with_prompt("Connection type")
         .items(TYPES)
@@ -265,8 +271,7 @@ fn prompt_snowflake() -> Result<SnowflakeConnection> {
             SnowflakeAuth::Password { user, password }
         }
         "oauth" => {
-            let oauth_token: String =
-                Password::new().with_prompt("OAuth token").interact()?;
+            let oauth_token: String = Password::new().with_prompt("OAuth token").interact()?;
             SnowflakeAuth::OAuth { oauth_token }
         }
         "browser" => {
@@ -333,10 +338,8 @@ fn prompt_cache_schema() -> Result<bool> {
 fn resolve_query(query: Option<String>, file: Option<PathBuf>) -> Result<String> {
     match (query, file) {
         (Some(q), _) => Ok(q),
-        (_, Some(path)) => {
-            std::fs::read_to_string(&path)
-                .wrap_err_with(|| format!("Failed to read SQL file: {}", path.display()))
-        }
+        (_, Some(path)) => std::fs::read_to_string(&path)
+            .wrap_err_with(|| format!("Failed to read SQL file: {}", path.display())),
         _ => bail!("Provide either --query or --file"),
     }
 }
@@ -383,10 +386,7 @@ fn run_query(conn_name: &str, sql: &str, limit: usize, format: &OutputFormat) ->
             let row_count = if truncated {
                 format!("{limit} of {total_rows} rows (limited)")
             } else {
-                format!(
-                    "{total_rows} row{}",
-                    if total_rows == 1 { "" } else { "s" }
-                )
+                format!("{total_rows} row{}", if total_rows == 1 { "" } else { "s" })
             };
             let duration = if elapsed.as_secs() >= 1 {
                 format!("{:.2}s", elapsed.as_secs_f64())
@@ -579,9 +579,7 @@ mod tests {
             "warehouse".to_string(),
             Connection::Snowflake(SnowflakeConnection {
                 account: "xy123".into(),
-                auth: SnowflakeAuth::Browser {
-                    user: "u".into(),
-                },
+                auth: SnowflakeAuth::Browser { user: "u".into() },
                 database: "PROD".into(),
                 warehouse: None,
                 schema: None,
@@ -642,11 +640,17 @@ mod tests {
         let mut connections = BTreeMap::new();
         connections.insert(
             "beta".to_string(),
-            Connection::DuckDb(DuckDbConnection { path: "x".into(), cache_schema: false }),
+            Connection::DuckDb(DuckDbConnection {
+                path: "x".into(),
+                cache_schema: false,
+            }),
         );
         connections.insert(
             "alpha".to_string(),
-            Connection::DuckDb(DuckDbConnection { path: "y".into(), cache_schema: false }),
+            Connection::DuckDb(DuckDbConnection {
+                path: "y".into(),
+                cache_schema: false,
+            }),
         );
         let profiles = Profiles { connections };
         assert_eq!(format_available_names(&profiles), "alpha, beta");
@@ -709,10 +713,7 @@ mod tests {
 
     #[test]
     fn table_column_width_adapts_to_data() {
-        let result = make_result(
-            vec!["x"],
-            vec![vec![Value::Text("longvalue".into())]],
-        );
+        let result = make_result(vec!["x"], vec![vec![Value::Text("longvalue".into())]]);
         let table = format_table(&result);
         let lines: Vec<&str> = table.lines().collect();
         // Column should be 9 wide (len of "longvalue"), not 1 (len of "x")
@@ -722,10 +723,7 @@ mod tests {
 
     #[test]
     fn table_null_values() {
-        let result = make_result(
-            vec!["val"],
-            vec![vec![Value::Null]],
-        );
+        let result = make_result(vec!["val"], vec![vec![Value::Null]]);
         let table = format_table(&result);
         assert!(table.contains("NULL"));
     }
@@ -750,10 +748,7 @@ mod tests {
 
     #[test]
     fn csv_escapes_commas() {
-        let result = make_result(
-            vec!["val"],
-            vec![vec![Value::Text("a,b".into())]],
-        );
+        let result = make_result(vec!["val"], vec![vec![Value::Text("a,b".into())]]);
         let csv = format_csv(&result);
         let lines: Vec<&str> = csv.lines().collect();
         assert_eq!(lines[1], "\"a,b\"");
@@ -761,10 +756,7 @@ mod tests {
 
     #[test]
     fn csv_escapes_quotes() {
-        let result = make_result(
-            vec!["val"],
-            vec![vec![Value::Text("say \"hi\"".into())]],
-        );
+        let result = make_result(vec!["val"], vec![vec![Value::Text("say \"hi\"".into())]]);
         let csv = format_csv(&result);
         let lines: Vec<&str> = csv.lines().collect();
         assert_eq!(lines[1], "\"say \"\"hi\"\"\"");
@@ -772,10 +764,7 @@ mod tests {
 
     #[test]
     fn csv_null_value() {
-        let result = make_result(
-            vec!["val"],
-            vec![vec![Value::Null]],
-        );
+        let result = make_result(vec!["val"], vec![vec![Value::Null]]);
         let csv = format_csv(&result);
         let lines: Vec<&str> = csv.lines().collect();
         assert_eq!(lines[1], "NULL");
@@ -785,10 +774,7 @@ mod tests {
 
     #[test]
     fn limit_truncates_rows() {
-        let mut result = make_result(
-            vec!["n"],
-            (0..10).map(|i| vec![Value::Int(i)]).collect(),
-        );
+        let mut result = make_result(vec!["n"], (0..10).map(|i| vec![Value::Int(i)]).collect());
         assert_eq!(result.rows.len(), 10);
         let limit = 3;
         result.rows.truncate(limit);

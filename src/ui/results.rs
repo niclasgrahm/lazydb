@@ -1,9 +1,9 @@
 use ratatui::{
+    Frame,
     buffer::Buffer,
     layout::Rect,
     style::{Color, Modifier, Style},
     widgets::{Block, Widget},
-    Frame,
 };
 
 use crate::app::{App, Focus, RESULTS_PAGE_SIZE};
@@ -246,10 +246,10 @@ impl<'a> ResultTable<'a> {
     fn visible_columns(&self, widths: &[usize], available: usize) -> Vec<usize> {
         let mut cols = Vec::new();
         let mut used = 0;
-        for i in self.scroll_col..widths.len() {
+        for (i, &width) in widths.iter().enumerate().skip(self.scroll_col) {
             // Each column needs: │ pad content pad = 1 + 1 + width + 1 = width + 3
             // Plus the final │ = 1
-            let needed = widths[i] + 3;
+            let needed = width + 3;
             if cols.is_empty() {
                 // Always show at least one column
                 cols.push(i);
@@ -302,6 +302,7 @@ impl<'a> ResultTable<'a> {
         format!("{row_info}  {col_info}{page_info}")
     }
 
+    #[allow(clippy::too_many_arguments)] // Low-level buffer painter; args are all primitives.
     fn draw_horizontal(
         &self,
         buf: &mut Buffer,
@@ -336,6 +337,7 @@ impl<'a> ResultTable<'a> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)] // Low-level buffer painter; args are all primitives.
     fn draw_row(
         &self,
         buf: &mut Buffer,

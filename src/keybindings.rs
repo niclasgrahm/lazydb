@@ -372,8 +372,10 @@ mod tests {
 
     #[test]
     fn custom_leader_key() {
-        let mut config = KeybindingsConfig::default();
-        config.leader_key = KeyInput::Single("\\".into());
+        let config = KeybindingsConfig {
+            leader_key: KeyInput::Single("\\".into()),
+            ..Default::default()
+        };
         let kb = Keybindings::from_config(config);
         let backslash = KeyEvent::new(KeyCode::Char('\\'), KeyModifiers::empty());
         assert!(kb.leader.matches(&backslash));
@@ -397,8 +399,10 @@ mod tests {
 
     #[test]
     fn leader_key_combo() {
-        let mut config = KeybindingsConfig::default();
-        config.leader_key = KeyInput::Single("ctrl+l".into());
+        let config = KeybindingsConfig {
+            leader_key: KeyInput::Single("ctrl+l".into()),
+            ..Default::default()
+        };
         let kb = Keybindings::from_config(config);
         let ctrl_l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL);
         let plain_l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::empty());
@@ -406,5 +410,4 @@ mod tests {
         assert!(!kb.leader.matches(&plain_l));
         assert_eq!(kb.leader.display, "ctrl+l");
     }
-
 }

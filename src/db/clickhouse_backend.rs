@@ -73,10 +73,10 @@ impl ClickHouse {
 
         let mut result = Vec::new();
         for row in rows {
-            if let Some(arr) = row.as_array() {
-                if let Some(val) = arr.first().and_then(|v| v.as_str()) {
-                    result.push(val.to_string());
-                }
+            if let Some(arr) = row.as_array()
+                && let Some(val) = arr.first().and_then(|v| v.as_str())
+            {
+                result.push(val.to_string());
             }
         }
         Ok(result)

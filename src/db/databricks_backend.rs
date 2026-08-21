@@ -107,8 +107,8 @@ impl Databricks {
             .read_to_string()
             .map_err(|e| format!("Failed to read Databricks response: {e}"))?;
 
-        let json: serde_json::Value = serde_json::from_str(&resp_body)
-            .map_err(|e| format!("JSON parse error: {e}"))?;
+        let json: serde_json::Value =
+            serde_json::from_str(&resp_body).map_err(|e| format!("JSON parse error: {e}"))?;
 
         if status_code >= 400 {
             let msg = json["message"].as_str().unwrap_or(&resp_body);
@@ -125,9 +125,7 @@ impl Databricks {
                     .unwrap_or("Unknown execution error");
                 Err(format!("Databricks query failed: {msg}"))
             }
-            "CANCELED" | "CLOSED" => {
-                Err(format!("Databricks query was {}", state.to_lowercase()))
-            }
+            "CANCELED" | "CLOSED" => Err(format!("Databricks query was {}", state.to_lowercase())),
             "PENDING" | "RUNNING" => {
                 let statement_id = json["statement_id"]
                     .as_str()
@@ -139,16 +137,16 @@ impl Databricks {
     }
 
     fn poll_statement(&self, statement_id: &str) -> Result<serde_json::Value, String> {
-        let url = format!(
-            "{}/api/2.0/sql/statements/{}",
-            self.base_url, statement_id
-        );
+        let url = format!("{}/api/2.0/sql/statements/{}", self.base_url, statement_id);
         let agent = databricks_agent();
         let auth = format!("Bearer {}", self.token);
 
         let backoffs = [500, 1000, 2000, 4000, 8000, 10000, 10000, 10000];
         for (attempt, wait_ms) in backoffs.iter().enumerate() {
-            debug!(attempt = attempt + 1, wait_ms, "databricks: polling for results");
+            debug!(
+                attempt = attempt + 1,
+                wait_ms, "databricks: polling for results"
+            );
             thread::sleep(Duration::from_millis(*wait_ms));
 
             let mut response = agent
@@ -193,10 +191,10 @@ impl Databricks {
             .ok_or("Expected 'result.data_array' in response")?;
         let mut result = Vec::new();
         for row in rows {
-            if let Some(arr) = row.as_array() {
-                if let Some(val) = arr.first().and_then(|v| v.as_str()) {
-                    result.push(val.to_string());
-                }
+            if let Some(arr) = row.as_array()
+                && let Some(val) = arr.first().and_then(|v| v.as_str())
+            {
+                result.push(val.to_string());
             }
         }
         Ok(result)

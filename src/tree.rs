@@ -84,10 +84,18 @@ impl TreeNode {
         if node.label.to_lowercase().contains(filter) {
             return true;
         }
-        node.children.iter().any(|c| Self::node_matches_recursive(c, filter))
+        node.children
+            .iter()
+            .any(|c| Self::node_matches_recursive(c, filter))
     }
 
-    fn flatten_filtered(node: &TreeNode, depth: u16, filter: &str, counter: &mut usize, out: &mut Vec<FlatNode>) {
+    fn flatten_filtered(
+        node: &TreeNode,
+        depth: u16,
+        filter: &str,
+        counter: &mut usize,
+        out: &mut Vec<FlatNode>,
+    ) {
         let idx = *counter;
         *counter += 1;
         if !Self::node_matches_recursive(node, filter) {
@@ -147,10 +155,8 @@ impl TreeNode {
                 return true;
             }
             *counter += 1;
-            if node.expanded {
-                if Self::walk_mut(&mut node.children, target, counter, action) {
-                    return true;
-                }
+            if node.expanded && Self::walk_mut(&mut node.children, target, counter, action) {
+                return true;
             }
         }
         false
@@ -325,10 +331,7 @@ mod tests {
                 "level1",
                 vec![TreeNode::folder(
                     "level2",
-                    vec![TreeNode::folder(
-                        "level3",
-                        vec![TreeNode::leaf("leaf")],
-                    )],
+                    vec![TreeNode::folder("level3", vec![TreeNode::leaf("leaf")])],
                 )],
             )],
         )];

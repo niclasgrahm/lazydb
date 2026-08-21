@@ -1,26 +1,158 @@
 use ratatui::style::{Color, Modifier, Style};
 
 const KEYWORDS: &[&str] = &[
-    "ADD", "ALL", "ALTER", "AND", "ANY", "AS", "ASC", "ATTACH", "BEGIN", "BETWEEN", "BIGINT",
-    "BOOLEAN", "BY", "CASCADE", "CASE", "CAST", "CHECK", "COLUMN", "COMMIT", "CONSTRAINT",
-    "CREATE", "CROSS", "DATABASE", "DATE", "DATETIME", "DECIMAL", "DEFAULT", "DELETE", "DESC",
-    "DESCRIBE", "DISTINCT", "DOUBLE", "DROP", "ELSE", "END", "ENGINE", "ENUM", "EXCEPT", "EXISTS",
-    "EXPLAIN", "FALSE", "FLOAT", "FOR", "FOREIGN", "FORMAT", "FROM", "FULL", "FUNCTION", "GRANT",
-    "GROUP", "HAVING", "IF", "ILIKE", "IN", "INDEX", "INNER", "INSERT", "INT", "INTEGER", "INTERSECT",
-    "INTERVAL", "INTO", "IS", "JOIN", "KEY", "LEFT", "LIKE", "LIMIT", "MATERIALIZED", "MERGE",
-    "NATURAL", "NOT", "NULL", "OFFSET", "ON", "OR", "ORDER", "OUTER", "OVER", "PARTITION",
-    "PRIMARY", "PROCEDURE", "REFERENCES", "REPLACE", "RETURNING", "REVOKE", "RIGHT", "ROLLBACK",
-    "ROW", "ROWS", "SCHEMA", "SELECT", "SET", "SHOW", "SMALLINT", "STRING", "TABLE", "TEMP",
-    "TEMPORARY", "TEXT", "THEN", "TINYINT", "TO", "TRIGGER", "TRUE", "TRUNCATE", "TYPE", "UINT32",
-    "UINT64", "UNION", "UNIQUE", "UPDATE", "USING", "VALUES", "VARCHAR", "VIEW", "VIRTUAL",
-    "WHEN", "WHERE", "WINDOW", "WITH",
+    "ADD",
+    "ALL",
+    "ALTER",
+    "AND",
+    "ANY",
+    "AS",
+    "ASC",
+    "ATTACH",
+    "BEGIN",
+    "BETWEEN",
+    "BIGINT",
+    "BOOLEAN",
+    "BY",
+    "CASCADE",
+    "CASE",
+    "CAST",
+    "CHECK",
+    "COLUMN",
+    "COMMIT",
+    "CONSTRAINT",
+    "CREATE",
+    "CROSS",
+    "DATABASE",
+    "DATE",
+    "DATETIME",
+    "DECIMAL",
+    "DEFAULT",
+    "DELETE",
+    "DESC",
+    "DESCRIBE",
+    "DISTINCT",
+    "DOUBLE",
+    "DROP",
+    "ELSE",
+    "END",
+    "ENGINE",
+    "ENUM",
+    "EXCEPT",
+    "EXISTS",
+    "EXPLAIN",
+    "FALSE",
+    "FLOAT",
+    "FOR",
+    "FOREIGN",
+    "FORMAT",
+    "FROM",
+    "FULL",
+    "FUNCTION",
+    "GRANT",
+    "GROUP",
+    "HAVING",
+    "IF",
+    "ILIKE",
+    "IN",
+    "INDEX",
+    "INNER",
+    "INSERT",
+    "INT",
+    "INTEGER",
+    "INTERSECT",
+    "INTERVAL",
+    "INTO",
+    "IS",
+    "JOIN",
+    "KEY",
+    "LEFT",
+    "LIKE",
+    "LIMIT",
+    "MATERIALIZED",
+    "MERGE",
+    "NATURAL",
+    "NOT",
+    "NULL",
+    "OFFSET",
+    "ON",
+    "OR",
+    "ORDER",
+    "OUTER",
+    "OVER",
+    "PARTITION",
+    "PRIMARY",
+    "PROCEDURE",
+    "REFERENCES",
+    "REPLACE",
+    "RETURNING",
+    "REVOKE",
+    "RIGHT",
+    "ROLLBACK",
+    "ROW",
+    "ROWS",
+    "SCHEMA",
+    "SELECT",
+    "SET",
+    "SHOW",
+    "SMALLINT",
+    "STRING",
+    "TABLE",
+    "TEMP",
+    "TEMPORARY",
+    "TEXT",
+    "THEN",
+    "TINYINT",
+    "TO",
+    "TRIGGER",
+    "TRUE",
+    "TRUNCATE",
+    "TYPE",
+    "UINT32",
+    "UINT64",
+    "UNION",
+    "UNIQUE",
+    "UPDATE",
+    "USING",
+    "VALUES",
+    "VARCHAR",
+    "VIEW",
+    "VIRTUAL",
+    "WHEN",
+    "WHERE",
+    "WINDOW",
+    "WITH",
 ];
 
 const FUNCTIONS: &[&str] = &[
-    "ABS", "AVG", "CEIL", "COALESCE", "CONCAT", "COUNT", "CURRENT_DATE", "CURRENT_TIMESTAMP",
-    "DATE_TRUNC", "EXTRACT", "FLOOR", "GREATEST", "IFNULL", "LEAST", "LENGTH", "LOWER", "MAX",
-    "MIN", "NOW", "NULLIF", "RANK", "ROUND", "ROW_NUMBER", "SUBSTR", "SUBSTRING", "SUM",
-    "TRIM", "UPPER",
+    "ABS",
+    "AVG",
+    "CEIL",
+    "COALESCE",
+    "CONCAT",
+    "COUNT",
+    "CURRENT_DATE",
+    "CURRENT_TIMESTAMP",
+    "DATE_TRUNC",
+    "EXTRACT",
+    "FLOOR",
+    "GREATEST",
+    "IFNULL",
+    "LEAST",
+    "LENGTH",
+    "LOWER",
+    "MAX",
+    "MIN",
+    "NOW",
+    "NULLIF",
+    "RANK",
+    "ROUND",
+    "ROW_NUMBER",
+    "SUBSTR",
+    "SUBSTRING",
+    "SUM",
+    "TRIM",
+    "UPPER",
 ];
 
 /// Style definitions
@@ -49,7 +181,10 @@ pub fn highlight_line(line: &str) -> Vec<HlSpan> {
         // Single-line comment: -- ...
         if i + 1 < len && chars[i] == '-' && chars[i + 1] == '-' {
             let rest: String = chars[i..].iter().collect();
-            spans.push(HlSpan { text: rest, style: STYLE_COMMENT });
+            spans.push(HlSpan {
+                text: rest,
+                style: STYLE_COMMENT,
+            });
             break;
         }
 
@@ -70,18 +205,26 @@ pub fn highlight_line(line: &str) -> Vec<HlSpan> {
                 }
             }
             let text: String = chars[start..i].iter().collect();
-            spans.push(HlSpan { text, style: STYLE_STRING });
+            spans.push(HlSpan {
+                text,
+                style: STYLE_STRING,
+            });
             continue;
         }
 
         // Number
-        if chars[i].is_ascii_digit() || (chars[i] == '.' && i + 1 < len && chars[i + 1].is_ascii_digit()) {
+        if chars[i].is_ascii_digit()
+            || (chars[i] == '.' && i + 1 < len && chars[i + 1].is_ascii_digit())
+        {
             let start = i;
             while i < len && (chars[i].is_ascii_digit() || chars[i] == '.') {
                 i += 1;
             }
             let text: String = chars[start..i].iter().collect();
-            spans.push(HlSpan { text, style: STYLE_NUMBER });
+            spans.push(HlSpan {
+                text,
+                style: STYLE_NUMBER,
+            });
             continue;
         }
 
@@ -106,16 +249,26 @@ pub fn highlight_line(line: &str) -> Vec<HlSpan> {
         }
 
         // Operators
-        if matches!(chars[i], '=' | '<' | '>' | '!' | '+' | '-' | '*' | '/' | '%') {
+        if matches!(
+            chars[i],
+            '=' | '<' | '>' | '!' | '+' | '-' | '*' | '/' | '%'
+        ) {
             let start = i;
             // Consume multi-char operators like !=, >=, <=, ||, ::
             i += 1;
-            if i < len && matches!((chars[start], chars[i]),
-                ('!', '=') | ('<', '=') | ('>', '=') | ('|', '|') | (':', ':') | ('-', '>')) {
+            if i < len
+                && matches!(
+                    (chars[start], chars[i]),
+                    ('!', '=') | ('<', '=') | ('>', '=') | ('|', '|') | (':', ':') | ('-', '>')
+                )
+            {
                 i += 1;
             }
             let text: String = chars[start..i].iter().collect();
-            spans.push(HlSpan { text, style: STYLE_OPERATOR });
+            spans.push(HlSpan {
+                text,
+                style: STYLE_OPERATOR,
+            });
             continue;
         }
 
@@ -135,7 +288,10 @@ pub fn highlight_line(line: &str) -> Vec<HlSpan> {
             i += 1;
         }
         let text: String = chars[start..i].iter().collect();
-        spans.push(HlSpan { text, style: STYLE_DEFAULT });
+        spans.push(HlSpan {
+            text,
+            style: STYLE_DEFAULT,
+        });
     }
 
     spans
@@ -147,10 +303,6 @@ mod tests {
 
     fn span_texts(line: &str) -> Vec<String> {
         highlight_line(line).into_iter().map(|s| s.text).collect()
-    }
-
-    fn span_styles(line: &str) -> Vec<Style> {
-        highlight_line(line).into_iter().map(|s| s.style).collect()
     }
 
     #[test]

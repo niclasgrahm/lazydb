@@ -52,9 +52,7 @@ fn main() -> Result<()> {
 
     let files_root = Some(match cli.path {
         None => std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-        Some(p) if p == std::path::Path::new(".") => {
-            std::env::current_dir().unwrap_or(p)
-        }
+        Some(p) if p == std::path::Path::new(".") => std::env::current_dir().unwrap_or(p),
         Some(p) => std::fs::canonicalize(&p).unwrap_or(p),
     });
 

@@ -1,5 +1,5 @@
-use postgres::types::Type;
 use postgres::Client;
+use postgres::types::Type;
 
 use super::{Database, ProgressFn, QueryResult, SchemaNode, Value};
 
@@ -51,7 +51,7 @@ impl Database for Postgres {
         for row in &rows {
             let mut values = Vec::with_capacity(columns.len());
             for (i, col) in row.columns().iter().enumerate() {
-                let val = extract_value(&row, i, col.type_());
+                let val = extract_value(row, i, col.type_());
                 values.push(val);
             }
             result_rows.push(values);
@@ -70,14 +70,19 @@ impl Database for Postgres {
         let mut schema_nodes = Vec::new();
 
         for (i, schema_name) in schema_names.into_iter().enumerate() {
-            progress(&format!("fetching schema ({}/{total}): {schema_name}", i + 1));
+            progress(&format!(
+                "fetching schema ({}/{total}): {schema_name}",
+                i + 1
+            ));
             let table_names = self.query_tables_for_schema(&schema_name)?;
             let view_names = self.query_views_for_schema(&schema_name)?;
 
             let tables: Vec<SchemaNode> = table_names
                 .into_iter()
                 .map(|name| {
-                    let cols = self.query_columns_for_schema(&schema_name, &name).unwrap_or_default();
+                    let cols = self
+                        .query_columns_for_schema(&schema_name, &name)
+                        .unwrap_or_default();
                     SchemaNode::group(name, cols)
                 })
                 .collect();
@@ -85,7 +90,9 @@ impl Database for Postgres {
             let views: Vec<SchemaNode> = view_names
                 .into_iter()
                 .map(|name| {
-                    let cols = self.query_columns_for_schema(&schema_name, &name).unwrap_or_default();
+                    let cols = self
+                        .query_columns_for_schema(&schema_name, &name)
+                        .unwrap_or_default();
                     SchemaNode::group(name, cols)
                 })
                 .collect();
