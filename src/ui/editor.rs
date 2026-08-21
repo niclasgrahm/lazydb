@@ -1,22 +1,18 @@
 use ratatui::{
-    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Padding, Paragraph},
+    Frame,
 };
 
 use crate::app::{App, EditorViewport, Focus};
 use crate::highlight;
+use crate::ui::theme;
 use crate::vim;
 
 pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
     let focused = app.focus == Focus::QueryEditor;
-    let border_style = if focused {
-        Style::default().fg(Color::Cyan)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
 
     let db_prefix = app
         .connected_db
@@ -33,8 +29,9 @@ pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
 
     let block = Block::default()
         .title(title)
-        .borders(Borders::ALL)
-        .border_style(border_style);
+        .title_style(theme::title(focused))
+        .padding(Padding::top(1))
+        .style(theme::surface(theme::WORKSPACE));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -79,7 +76,7 @@ pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
     // Draw visual selection highlight
     if let Some(((sr, sc), (er, ec))) = app.editor.selection_range() {
         let sel_style = Style::default()
-            .bg(Color::DarkGray)
+            .bg(theme::SELECTION)
             .add_modifier(Modifier::BOLD);
         for row in sr..=er {
             if row < scroll_row || row >= scroll_row + visible_height {
@@ -135,6 +132,8 @@ pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
         let style = Style::default().fg(Color::DarkGray);
         let max_len = inner.width as usize;
         let text: String = placeholder.chars().take(max_len).collect();
-        frame.buffer_mut().set_string(inner.x, inner.y, &text, style);
+        frame
+            .buffer_mut()
+            .set_string(inner.x, inner.y, &text, style);
     }
 }

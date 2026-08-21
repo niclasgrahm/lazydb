@@ -1,9 +1,9 @@
 use ratatui::{
-    Frame,
     layout::{Constraint, Flex, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
+    Frame,
 };
 
 use crate::app::App;
@@ -24,7 +24,9 @@ pub fn draw(app: &App, frame: &mut Frame) {
     let text = Line::from(vec![
         Span::styled(
             format!("{spinner_char} "),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(msg.as_str(), Style::default().fg(Color::White)),
     ]);

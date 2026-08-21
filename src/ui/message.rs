@@ -1,9 +1,9 @@
 use ratatui::{
-    Frame,
     layout::{Constraint, Flex, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    Frame,
 };
 
 use crate::app::{App, MessageLevel};
@@ -21,7 +21,11 @@ pub fn draw(app: &App, frame: &mut Frame) {
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD));
+        .border_style(
+            Style::default()
+                .fg(border_color)
+                .add_modifier(Modifier::BOLD),
+        );
 
     let hint = Line::from(vec![
         Span::styled("Press ", Style::default().fg(Color::DarkGray)),
@@ -29,15 +33,9 @@ pub fn draw(app: &App, frame: &mut Frame) {
         Span::styled(" to dismiss", Style::default().fg(Color::DarkGray)),
     ]);
 
-    let text = vec![
-        Line::from(msg.text.as_str()),
-        Line::raw(""),
-        hint,
-    ];
+    let text = vec![Line::from(msg.text.as_str()), Line::raw(""), hint];
 
-    let paragraph = Paragraph::new(text)
-        .block(block)
-        .wrap(Wrap { trim: false });
+    let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: false });
 
     frame.render_widget(Clear, area);
     frame.render_widget(paragraph, area);

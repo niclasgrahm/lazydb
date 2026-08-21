@@ -1,26 +1,22 @@
 use ratatui::{
-    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState},
+    widgets::{Block, List, ListItem, ListState, Padding},
+    Frame,
 };
 
 use crate::app::{App, Focus};
 use crate::recents::format_relative_time;
+use crate::ui::theme;
 
 pub fn draw(app: &App, frame: &mut Frame, area: Rect) {
     let focused = app.focus == Focus::Recent;
-    let border_style = if focused {
-        Style::default().fg(Color::Cyan)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-
     let block = Block::default()
         .title(" Recent ")
-        .borders(Borders::ALL)
-        .border_style(border_style);
+        .title_style(theme::title(focused))
+        .padding(Padding::top(1))
+        .style(theme::surface(theme::NAVIGATION));
 
     if app.recents.entries.is_empty() {
         let empty = List::new(vec![ListItem::new(Span::styled(
@@ -74,9 +70,7 @@ pub fn draw(app: &App, frame: &mut Frame, area: Rect) {
     let mut state = ListState::default();
     state.select(Some(app.recents_selected));
 
-    let list = List::new(items)
-        .block(block)
-        .highlight_symbol("▶ ");
+    let list = List::new(items).block(block).highlight_symbol("▶ ");
 
     frame.render_stateful_widget(list, area, &mut state);
 }

@@ -2,22 +2,24 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Widget},
+    widgets::{Block, Widget},
     Frame,
 };
 
 use crate::app::{App, Focus, RESULTS_PAGE_SIZE};
 use crate::db::{QueryResult, Value};
+use crate::ui::theme;
 
 pub fn draw(app: &App, frame: &mut Frame, area: Rect) {
     let focused = app.focus == Focus::Results;
-    let border_color = if focused { Color::Cyan } else { Color::DarkGray };
+    let border_color = if focused { theme::ACCENT } else { theme::MUTED };
+    frame.render_widget(Block::default().style(theme::surface(theme::RESULTS)), area);
 
     let Some(result) = &app.query_result else {
         let block = Block::default()
             .title(" Results ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(border_color));
+            .title_style(theme::title(focused))
+            .style(theme::surface(theme::RESULTS));
         frame.render_widget(block, area);
         return;
     };
@@ -121,7 +123,17 @@ impl<'a> Widget for ResultTable<'a> {
         let vis_widths: Vec<usize> = visible_cols.iter().map(|&i| widths[i]).collect();
 
         // Top border
-        self.draw_horizontal(buf, x0, y0, area.width, &vis_widths, '┌', '┬', '┐', border_style);
+        self.draw_horizontal(
+            buf,
+            x0,
+            y0,
+            area.width,
+            &vis_widths,
+            '┌',
+            '┬',
+            '┐',
+            border_style,
+        );
 
         // Overlay title on top border
         if !self.title.is_empty() {
@@ -151,7 +163,17 @@ impl<'a> Widget for ResultTable<'a> {
         );
 
         // Header separator
-        self.draw_horizontal(buf, x0, y0 + 2, area.width, &vis_widths, '├', '┼', '┤', border_style);
+        self.draw_horizontal(
+            buf,
+            x0,
+            y0 + 2,
+            area.width,
+            &vis_widths,
+            '├',
+            '┼',
+            '┤',
+            border_style,
+        );
 
         // Data rows with vertical scrolling
         let total_rows = self.result.rows.len();
@@ -159,9 +181,10 @@ impl<'a> Widget for ResultTable<'a> {
         for vi in 0..visible_rows {
             let ri = self.scroll_row + vi;
             let row = &self.result.rows[ri];
-            let strs: Vec<String> = visible_cols.iter().map(|&i| {
-                row.get(i).map(|v| v.to_string()).unwrap_or_default()
-            }).collect();
+            let strs: Vec<String> = visible_cols
+                .iter()
+                .map(|&i| row.get(i).map(|v| v.to_string()).unwrap_or_default())
+                .collect();
             let values: Vec<Option<&Value>> = visible_cols.iter().map(|&i| row.get(i)).collect();
             self.draw_row(
                 buf,
@@ -194,7 +217,7 @@ impl<'a> Widget for ResultTable<'a> {
         let status_y = bottom_y - 1;
         let status = self.build_status(total_rows, col_count, max_data_rows);
         // Fill status line background
-        let bg_style = Style::default().fg(Color::DarkGray);
+        let bg_style = Style::default().fg(theme::MUTED).bg(theme::RESULTS);
         buf.set_string(x0, status_y, "│", border_style);
         let fill = " ".repeat((area.width - 2) as usize);
         buf.set_string(x0 + 1, status_y, &fill, bg_style);
@@ -205,7 +228,17 @@ impl<'a> Widget for ResultTable<'a> {
         buf.set_string(x0 + 2, status_y, &status_text, bg_style);
 
         // Bottom border
-        self.draw_horizontal(buf, x0, bottom_y, area.width, &vis_widths, '└', '┴', '┘', border_style);
+        self.draw_horizontal(
+            buf,
+            x0,
+            bottom_y,
+            area.width,
+            &vis_widths,
+            '└',
+            '┴',
+            '┘',
+            border_style,
+        );
     }
 }
 

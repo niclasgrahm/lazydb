@@ -1,12 +1,13 @@
 use ratatui::{
-    Frame,
     layout::Rect,
     style::{Color, Style, Stylize},
     text::{Line, Span},
     widgets::Paragraph,
+    Frame,
 };
 
 use crate::app::{App, Focus};
+use crate::ui::theme;
 
 pub fn draw(app: &App, frame: &mut Frame, area: Rect) {
     let focus_label = match app.focus {
@@ -17,12 +18,13 @@ pub fn draw(app: &App, frame: &mut Frame, area: Rect) {
         Focus::Recent => "RECENT",
     };
 
-    let mut spans = vec![
-        Span::styled(
-            format!(" {focus_label} "),
-            Style::default().bg(Color::Cyan).fg(Color::Black).bold(),
-        ),
-    ];
+    let mut spans = vec![Span::styled(
+        format!(" {focus_label} "),
+        Style::default()
+            .bg(theme::ACCENT)
+            .fg(theme::WORKSPACE)
+            .bold(),
+    )];
 
     if let Some(db) = &app.connected_db {
         spans.push(Span::raw("  "));
@@ -36,9 +38,9 @@ pub fn draw(app: &App, frame: &mut Frame, area: Rect) {
     if area.width as usize > left_len + hint.len() {
         spans.push(Span::raw(" ".repeat(padding)));
     }
-    spans.push(Span::styled(hint, Style::default().fg(Color::DarkGray)));
+    spans.push(Span::styled(hint, Style::default().fg(theme::MUTED)));
 
     let status = Line::from(spans);
-    let bar = Paragraph::new(status).style(Style::default().bg(Color::Black));
+    let bar = Paragraph::new(status).style(theme::surface(theme::STATUS));
     frame.render_widget(bar, area);
 }

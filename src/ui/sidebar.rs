@@ -1,20 +1,16 @@
 use ratatui::{
-    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, List, ListItem, Padding, Paragraph},
+    Frame,
 };
 
 use crate::app::{App, Focus};
+use crate::ui::theme;
 
 pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
     let focused = app.focus == Focus::Sidebar;
-    let border_style = if focused {
-        Style::default().fg(Color::Cyan)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
 
     let has_filter = !app.sidebar_filter.is_empty() || app.sidebar_filtering;
 
@@ -29,12 +25,9 @@ pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
     if has_filter {
         let filter_block = Block::default()
             .title(" Filter ")
-            .borders(Borders::ALL)
-            .border_style(if app.sidebar_filtering {
-                Style::default().fg(Color::Yellow)
-            } else {
-                Style::default().fg(Color::DarkGray)
-            });
+            .title_style(theme::title(app.sidebar_filtering))
+            .padding(Padding::top(1))
+            .style(theme::surface(theme::NAVIGATION));
         let filter_text = Paragraph::new(Line::from(vec![
             Span::styled("/", Style::default().fg(Color::DarkGray)),
             Span::styled(&app.sidebar_filter, Style::default().fg(Color::White)),
@@ -50,8 +43,9 @@ pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
 
     let block = Block::default()
         .title(" Connections ")
-        .borders(Borders::ALL)
-        .border_style(border_style);
+        .title_style(theme::title(focused))
+        .padding(Padding::top(1))
+        .style(theme::surface(theme::NAVIGATION));
 
     let flat = app.filtered_flat_nodes();
     let selected = app.sidebar_state.selected();
@@ -65,7 +59,11 @@ pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
                 String::new()
             };
             let icon = if node.has_children {
-                if node.expanded { "▼ " } else { "▶ " }
+                if node.expanded {
+                    "▼ "
+                } else {
+                    "▶ "
+                }
             } else {
                 "  "
             };
@@ -109,13 +107,11 @@ pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        );
+    let list = List::new(items).block(block).highlight_style(
+        Style::default()
+            .bg(theme::SELECTION)
+            .add_modifier(Modifier::BOLD),
+    );
 
     frame.render_stateful_widget(list, chunks[1], &mut app.sidebar_state);
 }

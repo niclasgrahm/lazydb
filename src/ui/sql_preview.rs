@@ -1,19 +1,20 @@
 use ratatui::{
-    Frame,
     layout::Rect,
-    style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Padding, Paragraph},
+    Frame,
 };
 
 use crate::app::App;
 use crate::highlight;
+use crate::ui::theme;
 
 pub fn draw(app: &App, frame: &mut Frame, area: Rect) {
     let block = Block::default()
         .title(" SQL Preview ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray));
+        .title_style(theme::title(false))
+        .padding(Padding::top(1))
+        .style(theme::surface(theme::WORKSPACE));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);

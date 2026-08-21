@@ -1,9 +1,9 @@
 use ratatui::{
-    Frame,
     layout::{Constraint, Flex, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
+    Frame,
 };
 
 use crate::app::{App, Focus};
@@ -49,9 +49,10 @@ pub fn draw(app: &App, frame: &mut Frame) {
         }
         Focus::QueryEditor => {
             lines.push(section_header("Editor"));
-            lines.push(Line::from(vec![
-                Span::styled("  Vim keybindings", Style::default().fg(Color::DarkGray)),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                "  Vim keybindings",
+                Style::default().fg(Color::DarkGray),
+            )]));
             lines.push(Line::from(vec![
                 Span::styled("  i/a/o  ", Style::default().fg(Color::Yellow)),
                 Span::raw("Enter insert mode"),
@@ -83,22 +84,25 @@ pub fn draw(app: &App, frame: &mut Frame) {
         }
         Focus::Files => {
             lines.push(section_header("Files"));
-            lines.push(Line::from(vec![
-                Span::styled("  (empty)", Style::default().fg(Color::DarkGray)),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                "  (empty)",
+                Style::default().fg(Color::DarkGray),
+            )]));
         }
         Focus::Recent => {
             lines.push(section_header("Recent"));
-            lines.push(Line::from(vec![
-                Span::styled("  (empty)", Style::default().fg(Color::DarkGray)),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                "  (empty)",
+                Style::default().fg(Color::DarkGray),
+            )]));
         }
     }
 
     lines.push(Line::raw(""));
-    lines.push(Line::from(vec![
-        Span::styled("  Press any key to close", Style::default().fg(Color::DarkGray)),
-    ]));
+    lines.push(Line::from(vec![Span::styled(
+        "  Press any key to close",
+        Style::default().fg(Color::DarkGray),
+    )]));
 
     let height = (lines.len() as u16) + 2; // +2 for border
     let area = popup_area(frame.area(), 40, height);
@@ -106,7 +110,11 @@ pub fn draw(app: &App, frame: &mut Frame) {
     let block = Block::default()
         .title(" Keybindings ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+        .border_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
 
     let paragraph = Paragraph::new(lines).block(block);
 

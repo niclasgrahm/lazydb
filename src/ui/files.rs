@@ -1,20 +1,16 @@
 use ratatui::{
-    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, List, ListItem, Padding, Paragraph},
+    Frame,
 };
 
 use crate::app::{App, Focus};
+use crate::ui::theme;
 
 pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
     let focused = app.focus == Focus::Files;
-    let border_style = if focused {
-        Style::default().fg(Color::Cyan)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
 
     let title = if let Some(ref root) = app.files_root {
         let name = root
@@ -43,12 +39,9 @@ pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
     if has_filter {
         let filter_block = Block::default()
             .title(" Filter ")
-            .borders(Borders::ALL)
-            .border_style(if app.file_filtering {
-                Style::default().fg(Color::Yellow)
-            } else {
-                Style::default().fg(Color::DarkGray)
-            });
+            .title_style(theme::title(app.file_filtering))
+            .padding(Padding::top(1))
+            .style(theme::surface(theme::NAVIGATION));
         let filter_text = Paragraph::new(Line::from(vec![
             Span::styled("/", Style::default().fg(Color::DarkGray)),
             Span::styled(app.file_filter.clone(), Style::default().fg(Color::White)),
@@ -66,8 +59,9 @@ pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
 
     let block = Block::default()
         .title(title)
-        .borders(Borders::ALL)
-        .border_style(border_style);
+        .title_style(theme::title(focused))
+        .padding(Padding::top(1))
+        .style(theme::surface(theme::NAVIGATION));
 
     let flat = app.filtered_file_nodes();
     let selected = app.file_tree_state.selected();
@@ -82,13 +76,19 @@ pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
                 String::new()
             };
             let icon = if node.has_children {
-                if node.expanded { "▼ " } else { "▶ " }
+                if node.expanded {
+                    "▼ "
+                } else {
+                    "▶ "
+                }
             } else {
                 "  "
             };
 
             let base_style = if node.has_children {
-                Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Blue)
+                    .add_modifier(Modifier::BOLD)
             } else if node.label.ends_with(".sql") {
                 Style::default().fg(Color::Yellow)
             } else {
@@ -108,13 +108,11 @@ pub fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        );
+    let list = List::new(items).block(block).highlight_style(
+        Style::default()
+            .bg(theme::SELECTION)
+            .add_modifier(Modifier::BOLD),
+    );
 
     frame.render_stateful_widget(list, list_area, &mut app.file_tree_state);
 }

@@ -10,15 +10,21 @@ mod results;
 mod sidebar;
 mod sql_preview;
 mod status_bar;
+mod theme;
 
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout},
+    widgets::Block,
+    Frame,
 };
 
 use crate::app::App;
 
 pub fn draw(app: &mut App, frame: &mut Frame) {
+    frame.render_widget(
+        Block::default().style(theme::surface(theme::WORKSPACE)),
+        frame.area(),
+    );
     let outer = if app.results_visible {
         Layout::default()
             .direction(Direction::Vertical)
