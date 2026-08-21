@@ -2,7 +2,9 @@
 
 A terminal UI database client for the keyboard-driven developer. Inspired by lazygit/lazydocker.
 
+[![CI](https://github.com/niclasgrahm/lazydb/actions/workflows/ci.yml/badge.svg)](https://github.com/niclasgrahm/lazydb/actions/workflows/ci.yml)
 ![Rust](https://img.shields.io/badge/rust-2024-orange)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 ## Features
 
@@ -69,6 +71,12 @@ dbname = "mydb"
 
 A companion Neovim plugin is available in [`nvim-lazydb/`](./nvim-lazydb/).
 
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md) for the
+workflow and local checks. `main` is protected; changes land via pull request
+with CI green.
+
 ## License
 
-MIT
+[MIT](./LICENSE)
