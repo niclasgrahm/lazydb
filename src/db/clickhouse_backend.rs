@@ -1,5 +1,6 @@
 use serde_json;
 
+use super::ssh_tunnel::SshTunnel;
 use super::{Database, ProgressFn, QueryResult, SchemaNode, Value};
 
 pub struct ClickHouse {
@@ -7,6 +8,7 @@ pub struct ClickHouse {
     database: String,
     user: String,
     password: Option<String>,
+    _tunnel: Option<SshTunnel>,
 }
 
 impl ClickHouse {
@@ -15,12 +17,14 @@ impl ClickHouse {
         database: &str,
         user: &str,
         password: Option<&str>,
+        tunnel: Option<SshTunnel>,
     ) -> Result<Self, String> {
         let ch = Self {
             base_url: url.trim_end_matches('/').to_string(),
             database: database.to_string(),
             user: user.to_string(),
             password: password.map(|s| s.to_string()),
+            _tunnel: tunnel,
         };
         // Verify connectivity with a simple query
         ch.raw_query("SELECT 1")?;

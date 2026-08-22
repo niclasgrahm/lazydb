@@ -3,6 +3,7 @@ pub mod databricks_backend;
 pub mod duckdb_backend;
 pub mod postgres_backend;
 pub mod snowflake_backend;
+pub mod ssh_tunnel;
 
 use serde::{Deserialize, Serialize};
 use std::fmt;

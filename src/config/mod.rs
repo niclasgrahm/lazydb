@@ -11,6 +11,7 @@ use crate::db::databricks_backend::Databricks;
 use crate::db::duckdb_backend::DuckDb;
 use crate::db::postgres_backend::Postgres;
 use crate::db::snowflake_backend::Snowflake;
+use crate::db::ssh_tunnel::SshTunnel;
 use crate::keybindings::KeybindingsConfig;
 
 pub(crate) fn config_dir() -> PathBuf {
@@ -108,6 +109,8 @@ pub struct PostgresConnection {
     pub database: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_tunnel: Option<SshTunnelConfig>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub cache_schema: bool,
 }
@@ -122,9 +125,13 @@ fn default_pg_port() -> u16 {
 
 impl PostgresConnection {
     pub fn connection_string(&self) -> String {
+        self.connection_string_for(&self.host, self.port)
+    }
+
+    fn connection_string_for(&self, host: &str, port: u16) -> String {
         let mut s = format!(
             "host={} port={} user={} dbname={}",
-            self.host, self.port, self.user, self.database
+            host, port, self.user, self.database
         );
         if let Some(pw) = &self.password {
             s.push_str(&format!(" password={pw}"));
@@ -148,6 +155,8 @@ pub struct ClickHouseConnection {
     pub password: Option<String>,
     #[serde(default = "default_clickhouse_database")]
     pub database: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_tunnel: Option<SshTunnelConfig>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub cache_schema: bool,
 }
@@ -162,6 +171,88 @@ fn default_clickhouse_user() -> String {
 
 fn default_clickhouse_database() -> String {
     "default".to_string()
+}
+
+impl ClickHouseConnection {
+    fn endpoint(&self) -> Result<ClickHouseEndpoint, String> {
+        let uri: ureq::http::Uri = self
+            .url
+            .parse()
+            .map_err(|e| format!("Invalid ClickHouse URL '{}': {e}", self.url))?;
+        let scheme = uri
+            .scheme_str()
+            .filter(|scheme| matches!(*scheme, "http" | "https"))
+            .ok_or_else(|| format!("ClickHouse URL '{}' must use HTTP or HTTPS", self.url))?;
+        let authority = uri
+            .authority()
+            .ok_or_else(|| format!("ClickHouse URL '{}' has no host", self.url))?;
+        let host = authority
+            .host()
+            .strip_prefix('[')
+            .and_then(|host| host.strip_suffix(']'))
+            .unwrap_or_else(|| authority.host())
+            .to_string();
+        let port = authority
+            .port_u16()
+            .or(match scheme {
+                "http" => Some(80),
+                "https" => Some(443),
+                _ => None,
+            })
+            .ok_or_else(|| format!("ClickHouse URL '{}' has no port", self.url))?;
+        let path_and_query = uri
+            .path_and_query()
+            .map(|path| path.as_str())
+            .unwrap_or("/")
+            .to_string();
+        Ok(ClickHouseEndpoint {
+            scheme: scheme.to_string(),
+            host,
+            port,
+            path_and_query,
+        })
+    }
+}
+
+struct ClickHouseEndpoint {
+    scheme: String,
+    host: String,
+    port: u16,
+    path_and_query: String,
+}
+
+impl ClickHouseEndpoint {
+    fn host(&self) -> &str {
+        &self.host
+    }
+
+    fn port(&self) -> u16 {
+        self.port
+    }
+
+    fn with_local_port(self, port: u16) -> String {
+        format!("{}://127.0.0.1:{port}{}", self.scheme, self.path_and_query)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SshTunnelConfig {
+    pub host: String,
+    #[serde(default = "default_ssh_port")]
+    pub port: u16,
+    pub user: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_file: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub known_hosts: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_port: Option<u16>,
+}
+
+fn default_ssh_port() -> u16 {
+    22
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -230,11 +321,38 @@ impl Connection {
             Connection::DuckDb(cfg) => {
                 DuckDb::connect(&cfg.path).map(|db| Box::new(db) as Box<dyn Database>)
             }
-            Connection::Postgres(cfg) => Postgres::connect(&cfg.connection_string())
-                .map(|db| Box::new(db) as Box<dyn Database>),
-            Connection::ClickHouse(cfg) => {
-                ClickHouse::connect(&cfg.url, &cfg.database, &cfg.user, cfg.password.as_deref())
+            Connection::Postgres(cfg) => {
+                let tunnel = cfg
+                    .ssh_tunnel
+                    .as_ref()
+                    .map(|tunnel| SshTunnel::connect(tunnel, &cfg.host, cfg.port))
+                    .transpose()?;
+                let connection_string = match &tunnel {
+                    Some(tunnel) => cfg.connection_string_for("127.0.0.1", tunnel.local_port()),
+                    None => cfg.connection_string(),
+                };
+                Postgres::connect(&connection_string, tunnel)
                     .map(|db| Box::new(db) as Box<dyn Database>)
+            }
+            Connection::ClickHouse(cfg) => {
+                let endpoint = cfg.endpoint()?;
+                let tunnel = cfg
+                    .ssh_tunnel
+                    .as_ref()
+                    .map(|tunnel| SshTunnel::connect(tunnel, endpoint.host(), endpoint.port()))
+                    .transpose()?;
+                let url = match &tunnel {
+                    Some(tunnel) => endpoint.with_local_port(tunnel.local_port()).to_string(),
+                    None => cfg.url.clone(),
+                };
+                ClickHouse::connect(
+                    &url,
+                    &cfg.database,
+                    &cfg.user,
+                    cfg.password.as_deref(),
+                    tunnel,
+                )
+                .map(|db| Box::new(db) as Box<dyn Database>)
             }
             Connection::Snowflake(cfg) => match &cfg.auth {
                 SnowflakeAuth::Password { user, password } => Snowflake::connect_password(
@@ -400,6 +518,7 @@ mod tests {
             password: Some("secret".into()),
             database: "mydb".into(),
             schema: None,
+            ssh_tunnel: None,
             cache_schema: false,
         };
         let s = pg.connection_string();
@@ -419,6 +538,7 @@ mod tests {
             password: None,
             database: "mydb".into(),
             schema: None,
+            ssh_tunnel: None,
             cache_schema: false,
         };
         let s = pg.connection_string();
@@ -434,6 +554,7 @@ mod tests {
             password: None,
             database: "db".into(),
             schema: None,
+            ssh_tunnel: None,
             cache_schema: false,
         };
         assert_eq!(pg.schema_name(), "public");
@@ -448,6 +569,7 @@ mod tests {
             password: None,
             database: "db".into(),
             schema: Some("reporting".into()),
+            ssh_tunnel: None,
             cache_schema: false,
         };
         assert_eq!(pg.schema_name(), "reporting");
@@ -469,6 +591,54 @@ mod tests {
             }
             _ => panic!("expected ClickHouse"),
         }
+    }
+
+    #[test]
+    fn parse_postgres_ssh_tunnel() {
+        let toml = r#"
+            [connections.pg]
+            type = "postgres"
+            host = "postgres.internal"
+            user = "analyst"
+            database = "warehouse"
+
+            [connections.pg.ssh_tunnel]
+            host = "bastion.example.com"
+            user = "deploy"
+            identity_file = "~/.ssh/id_ed25519"
+            remote_port = 5433
+        "#;
+
+        let profiles: Profiles = toml::from_str(toml).unwrap();
+        let Connection::Postgres(postgres) = profiles.connections.get("pg").unwrap() else {
+            panic!("expected Postgres")
+        };
+        let tunnel = postgres.ssh_tunnel.as_ref().unwrap();
+        assert_eq!(tunnel.host, "bastion.example.com");
+        assert_eq!(tunnel.port, 22);
+        assert_eq!(tunnel.identity_file.as_deref(), Some("~/.ssh/id_ed25519"));
+        assert_eq!(tunnel.remote_host, None);
+        assert_eq!(tunnel.remote_port, Some(5433));
+    }
+
+    #[test]
+    fn clickhouse_tunnel_endpoint_uses_loopback_and_preserves_path() {
+        let connection = ClickHouseConnection {
+            url: "https://clickhouse.internal:8443/api?compress=1".into(),
+            user: "default".into(),
+            password: None,
+            database: "default".into(),
+            ssh_tunnel: None,
+            cache_schema: false,
+        };
+
+        let endpoint = connection.endpoint().unwrap();
+        assert_eq!(endpoint.host(), "clickhouse.internal");
+        assert_eq!(endpoint.port(), 8443);
+        assert_eq!(
+            endpoint.with_local_port(49152),
+            "https://127.0.0.1:49152/api?compress=1"
+        );
     }
 
     #[test]
@@ -552,6 +722,7 @@ mod tests {
             password: None,
             database: "d".into(),
             schema: None,
+            ssh_tunnel: None,
             cache_schema: false,
         });
         assert_eq!(pg.type_name(), "postgres");
@@ -561,6 +732,7 @@ mod tests {
             user: "u".into(),
             password: None,
             database: "d".into(),
+            ssh_tunnel: None,
             cache_schema: false,
         });
         assert_eq!(ch.type_name(), "clickhouse");
@@ -744,6 +916,7 @@ mod tests {
             password: Some("pw".into()),
             database: "d".into(),
             schema: Some("s".into()),
+            ssh_tunnel: None,
             cache_schema: false,
         }));
         match c {
@@ -754,6 +927,34 @@ mod tests {
             }
             _ => panic!("wrong variant"),
         }
+    }
+
+    #[test]
+    fn save_round_trip_clickhouse_with_ssh_tunnel() {
+        let c = round_trip(Connection::ClickHouse(ClickHouseConnection {
+            url: "http://clickhouse.internal:8123".into(),
+            user: "default".into(),
+            password: None,
+            database: "analytics".into(),
+            ssh_tunnel: Some(SshTunnelConfig {
+                host: "bastion.example.com".into(),
+                port: 2222,
+                user: "deploy".into(),
+                identity_file: Some("~/.ssh/id_ed25519".into()),
+                known_hosts: Some("~/.ssh/known_hosts_work".into()),
+                remote_host: Some("clickhouse.private".into()),
+                remote_port: Some(8124),
+            }),
+            cache_schema: false,
+        }));
+
+        let Connection::ClickHouse(clickhouse) = c else {
+            panic!("wrong variant")
+        };
+        let tunnel = clickhouse.ssh_tunnel.unwrap();
+        assert_eq!(tunnel.port, 2222);
+        assert_eq!(tunnel.remote_host.as_deref(), Some("clickhouse.private"));
+        assert_eq!(tunnel.remote_port, Some(8124));
     }
 
     #[test]
@@ -768,6 +969,7 @@ mod tests {
                 password: None,
                 database: "d".into(),
                 schema: None,
+                ssh_tunnel: None,
                 cache_schema: false,
             }),
         );
@@ -832,6 +1034,7 @@ mod tests {
             user: "default".into(),
             password: Some("p".into()),
             database: "d".into(),
+            ssh_tunnel: None,
             cache_schema: true,
         }));
         match c {

@@ -1746,6 +1746,7 @@ mod tests {
                 password: None,
                 database: "testdb".into(),
                 schema: None,
+                ssh_tunnel: None,
                 cache_schema: false,
             }),
         );
