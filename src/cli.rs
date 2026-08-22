@@ -7,7 +7,7 @@ use color_eyre::eyre::{Context, bail};
 
 use crate::config::{
     ClickHouseConnection, Connection, DatabricksConnection, DuckDbConnection, PostgresConnection,
-    Profiles, SnowflakeAuth, SnowflakeConnection, validate_new_name,
+    Profiles, SnowflakeAuth, SnowflakeConnection, SshTunnelConfig, validate_new_name,
 };
 use crate::db::QueryResult;
 
@@ -219,6 +219,7 @@ fn prompt_postgres() -> Result<PostgresConnection> {
     let password = prompt_optional_password("Password (blank for none)")?;
     let database: String = Input::new().with_prompt("Database").interact_text()?;
     let schema = prompt_optional("Schema (blank for default)")?;
+    let ssh_tunnel = prompt_ssh_tunnel()?;
     Ok(PostgresConnection {
         host,
         port,
@@ -226,6 +227,7 @@ fn prompt_postgres() -> Result<PostgresConnection> {
         password,
         database,
         schema,
+        ssh_tunnel,
         cache_schema: prompt_cache_schema()?,
     })
 }
@@ -244,13 +246,56 @@ fn prompt_clickhouse() -> Result<ClickHouseConnection> {
         .with_prompt("Database")
         .default("default".to_string())
         .interact_text()?;
+    let ssh_tunnel = prompt_ssh_tunnel()?;
     Ok(ClickHouseConnection {
         url,
         user,
         password,
         database,
+        ssh_tunnel,
         cache_schema: prompt_cache_schema()?,
     })
+}
+
+fn prompt_ssh_tunnel() -> Result<Option<SshTunnelConfig>> {
+    if !Confirm::new()
+        .with_prompt("Connect through an SSH tunnel?")
+        .default(false)
+        .interact()?
+    {
+        return Ok(None);
+    }
+
+    let host: String = Input::new()
+        .with_prompt("SSH bastion host")
+        .interact_text()?;
+    let port: u16 = Input::new()
+        .with_prompt("SSH port")
+        .default(22u16)
+        .interact_text()?;
+    let user: String = Input::new().with_prompt("SSH user").interact_text()?;
+    let identity_file = prompt_optional("SSH identity file (blank for agent/default keys)")?;
+    let known_hosts = prompt_optional("known_hosts file (blank for default)")?;
+    let remote_host = prompt_optional("Remote database host (blank for profile host)")?;
+    let remote_port = if remote_host.is_some() {
+        Some(
+            Input::new()
+                .with_prompt("Remote database port")
+                .interact_text()?,
+        )
+    } else {
+        None
+    };
+
+    Ok(Some(SshTunnelConfig {
+        host,
+        port,
+        user,
+        identity_file,
+        known_hosts,
+        remote_host,
+        remote_port,
+    }))
 }
 
 fn prompt_snowflake() -> Result<SnowflakeConnection> {
@@ -596,6 +641,7 @@ mod tests {
                 password: None,
                 database: "analytics".into(),
                 schema: None,
+                ssh_tunnel: None,
                 cache_schema: false,
             }),
         );
@@ -613,6 +659,7 @@ mod tests {
                 user: "default".into(),
                 password: None,
                 database: "default".into(),
+                ssh_tunnel: None,
                 cache_schema: false,
             }),
         );

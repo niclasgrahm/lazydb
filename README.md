@@ -40,19 +40,29 @@ Config files live in `~/.config/lazydb/`:
 Example `profiles.toml`:
 
 ```toml
-[[profiles]]
-name = "local"
+[connections.local]
 type = "duckdb"
 path = "/path/to/database.db"
 
-[[profiles]]
-name = "prod"
+[connections.prod]
 type = "postgres"
-host = "localhost"
+host = "postgres.internal"
 port = 5432
 user = "postgres"
-dbname = "mydb"
+database = "mydb"
+
+[connections.prod.ssh_tunnel]
+host = "bastion.example.com"
+user = "deploy"
+identity_file = "~/.ssh/id_ed25519"
 ```
+
+PostgreSQL and ClickHouse profiles can connect through an SSH tunnel. lazydb
+uses the system `ssh` client, including its normal SSH-agent, default key, and
+host-key verification behavior. `ssh_tunnel.port` defaults to `22`; `identity_file`
+and `known_hosts` are optional. `remote_host` and `remote_port` optionally override
+the database host and port reached from the bastion. The local forwarding port is
+allocated automatically.
 
 ## Keybindings
 

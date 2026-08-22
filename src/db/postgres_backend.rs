@@ -1,16 +1,21 @@
 use postgres::Client;
 use postgres::types::Type;
 
+use super::ssh_tunnel::SshTunnel;
 use super::{Database, ProgressFn, QueryResult, SchemaNode, Value};
 
 pub struct Postgres {
     client: Client,
+    _tunnel: Option<SshTunnel>,
 }
 
 impl Postgres {
-    pub fn connect(conn_str: &str) -> Result<Self, String> {
+    pub fn connect(conn_str: &str, tunnel: Option<SshTunnel>) -> Result<Self, String> {
         let client = Client::connect(conn_str, postgres::NoTls).map_err(|e| e.to_string())?;
-        Ok(Self { client })
+        Ok(Self {
+            client,
+            _tunnel: tunnel,
+        })
     }
 }
 
