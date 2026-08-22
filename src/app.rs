@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use color_eyre::Result;
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
     layout::Rect,
     style::{Color, Style},
@@ -152,6 +152,7 @@ pub struct App<'a> {
     pub results_area: Rect,
     pub loading: Option<String>,
     pub spinner_tick: usize,
+    connecting: bool,
     bg_receiver: Option<mpsc::Receiver<BgResult>>,
     /// Connection labels whose sidebar tree was loaded from the on-disk cache
     /// rather than a live fetch. Cleared once a fresh fetch repopulates them.
@@ -251,6 +252,7 @@ impl<'a> App<'a> {
             results_area: Rect::default(),
             loading: None,
             spinner_tick: 0,
+            connecting: false,
             bg_receiver: None,
             cached_connections: HashSet::new(),
             sidebar_filter: String::new(),
@@ -482,105 +484,114 @@ impl<'a> App<'a> {
             return Ok(());
         }
 
-        let event = event::read()?;
-        if let Event::Key(key) = &event {
-            if key.kind != KeyEventKind::Press {
-                return Ok(());
-            }
-
-            // While loading, only allow quit
-            if self.loading.is_some() {
-                return Ok(());
-            }
-
-            // Dismiss message overlay
-            if self.message.is_some() {
-                self.message = None;
-                return Ok(());
-            }
-
-            // Toggle help overlay
-            if self.show_help {
-                self.show_help = false;
-                return Ok(());
-            }
-
-            let in_normal =
-                !matches!(self.focus, Focus::QueryEditor) || self.vim.mode == vim::Mode::Normal;
-
-            // Leader key dispatch: if leader is active, handle the action key
-            if self.leader_active {
-                self.leader_active = false;
-                if let Event::Key(key) = &event {
-                    self.handle_leader_action(key);
-                }
-                return Ok(());
-            }
-
-            // Activate leader mode on leader key press (only in normal-like contexts)
-            if in_normal && self.keys.leader.matches(key) {
-                self.leader_active = true;
-                return Ok(());
-            }
-
-            // Global keybindings (only when not in editor insert mode)
-            if in_normal {
-                if self.keys.global.show_help.matches(key) {
-                    self.show_help = true;
-                    return Ok(());
-                }
-                if self.keys.global.execute_query.matches(key) {
-                    self.execute_query();
-                    return Ok(());
-                }
-                if self.keys.global.format_query.matches(key) {
-                    self.format_query();
-                    return Ok(());
-                }
-                if self.keys.global.next_pane.matches(key) {
-                    self.focus = self.next_visible_focus(true);
-                    return Ok(());
-                }
-                if self.keys.global.prev_pane.matches(key) {
-                    self.focus = self.next_visible_focus(false);
-                    return Ok(());
-                }
-            }
-
-            match self.focus {
-                Focus::QueryEditor => {
-                    // If a completion popup is open, intercept navigation
-                    // keys before forwarding to vim/textarea.
-                    if self.completion.is_some() && self.handle_completion_key(key) {
-                        return Ok(());
-                    }
-                    let input: Input = event.into();
-                    match self.vim.transition(input, &mut self.editor) {
-                        Transition::Mode(mode) if self.vim.mode != mode => {
-                            self.vim = Vim::new(mode);
-                        }
-                        Transition::Nop | Transition::Mode(_) => {}
-                        Transition::Pending(input) => {
-                            self.vim = Vim::new(self.vim.mode).with_pending(input);
-                        }
-                    }
-                    // After the keystroke is applied, refresh the popup if
-                    // we're still in Insert mode; otherwise clear it.
-                    if self.vim.mode == vim::Mode::Insert {
-                        self.recompute_completion();
-                    } else {
-                        self.completion = None;
-                    }
-                }
-                Focus::Sidebar if self.sidebar_filtering => self.handle_sidebar_filter_key(key),
-                Focus::Sidebar => self.handle_sidebar_key(key),
-                Focus::Results => self.handle_results_key(key),
-                Focus::Files if self.file_filtering => self.handle_files_filter_key(key),
-                Focus::Files => self.handle_files_key(key),
-                Focus::Recent => self.handle_recent_key(key),
-            }
+        if let Event::Key(key) = event::read()? {
+            self.handle_key_event(key);
         }
         Ok(())
+    }
+
+    fn handle_key_event(&mut self, key: KeyEvent) {
+        if key.kind != KeyEventKind::Press {
+            return;
+        }
+
+        if self.loading.is_some() {
+            if self.connecting && key.code == KeyCode::Esc {
+                self.cancel_connection();
+            }
+            return;
+        }
+
+        // Dismiss message overlay
+        if self.message.is_some() {
+            self.message = None;
+            return;
+        }
+
+        // Toggle help overlay
+        if self.show_help {
+            self.show_help = false;
+            return;
+        }
+
+        let in_normal =
+            !matches!(self.focus, Focus::QueryEditor) || self.vim.mode == vim::Mode::Normal;
+
+        // Leader key dispatch: if leader is active, handle the action key
+        if self.leader_active {
+            self.leader_active = false;
+            self.handle_leader_action(&key);
+            return;
+        }
+
+        // Activate leader mode on leader key press (only in normal-like contexts)
+        if in_normal && self.keys.leader.matches(&key) {
+            self.leader_active = true;
+            return;
+        }
+
+        // Global keybindings (only when not in editor insert mode)
+        if in_normal {
+            if self.keys.global.show_help.matches(&key) {
+                self.show_help = true;
+                return;
+            }
+            if self.keys.global.execute_query.matches(&key) {
+                self.execute_query();
+                return;
+            }
+            if self.keys.global.format_query.matches(&key) {
+                self.format_query();
+                return;
+            }
+            if self.keys.global.next_pane.matches(&key) {
+                self.focus = self.next_visible_focus(true);
+                return;
+            }
+            if self.keys.global.prev_pane.matches(&key) {
+                self.focus = self.next_visible_focus(false);
+                return;
+            }
+        }
+
+        match self.focus {
+            Focus::QueryEditor => {
+                // If a completion popup is open, intercept navigation
+                // keys before forwarding to vim/textarea.
+                if self.completion.is_some() && self.handle_completion_key(&key) {
+                    return;
+                }
+                let input: Input = key.into();
+                match self.vim.transition(input, &mut self.editor) {
+                    Transition::Mode(mode) if self.vim.mode != mode => {
+                        self.vim = Vim::new(mode);
+                    }
+                    Transition::Nop | Transition::Mode(_) => {}
+                    Transition::Pending(input) => {
+                        self.vim = Vim::new(self.vim.mode).with_pending(input);
+                    }
+                }
+                // After the keystroke is applied, refresh the popup if
+                // we're still in Insert mode; otherwise clear it.
+                if self.vim.mode == vim::Mode::Insert {
+                    self.recompute_completion();
+                } else {
+                    self.completion = None;
+                }
+            }
+            Focus::Sidebar if self.sidebar_filtering => self.handle_sidebar_filter_key(&key),
+            Focus::Sidebar => self.handle_sidebar_key(&key),
+            Focus::Results => self.handle_results_key(&key),
+            Focus::Files if self.file_filtering => self.handle_files_filter_key(&key),
+            Focus::Files => self.handle_files_key(&key),
+            Focus::Recent => self.handle_recent_key(&key),
+        }
+    }
+
+    fn cancel_connection(&mut self) {
+        self.loading = None;
+        self.connecting = false;
+        self.bg_receiver = None;
     }
 
     /// Classifies the currently selected sidebar node.
@@ -1207,8 +1218,9 @@ impl<'a> App<'a> {
 
                 let (tx, rx) = mpsc::channel();
                 self.bg_receiver = Some(rx);
-                self.loading = Some(format!("Connecting to {label}…"));
+                self.loading = Some(format!("Connecting to {label}… (Esc to cancel)"));
                 self.spinner_tick = 0;
+                self.connecting = true;
 
                 let label_clone = label.clone();
                 let tx_progress = tx.clone();
@@ -1349,6 +1361,7 @@ impl<'a> App<'a> {
             }
             BgResult::Connected { label, result } => {
                 self.loading = None;
+                self.connecting = false;
                 self.bg_receiver = None;
                 match result {
                     Ok((db, schema, source)) => {
@@ -2162,6 +2175,27 @@ mod tests {
         assert!(app.connected_db.is_none());
         assert!(app.message.is_some());
         assert_eq!(app.message.as_ref().unwrap().level, MessageLevel::Error);
+    }
+
+    #[test]
+    fn escape_cancels_connection_attempt() {
+        let mut app = App::new(AppConfig::default(), test_profiles(), None, None);
+        let (tx, rx) = mpsc::channel();
+        app.set_bg_receiver(rx);
+        app.loading = Some("Connecting to local…".into());
+        app.connecting = true;
+
+        app.handle_key_event(key(KeyCode::Esc));
+
+        assert!(app.loading.is_none());
+        assert!(app.bg_receiver.is_none());
+        assert!(!app.connecting);
+        assert!(
+            tx.send(BgResult::Progress {
+                message: "still connecting".into(),
+            })
+            .is_err()
+        );
     }
 
     #[test]
