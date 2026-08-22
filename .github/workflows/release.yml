@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  BINARY_NAME: lazydb
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+          - name: x86_64-apple-darwin
+            os: macos-13
+            archive: tar.gz
+          - name: aarch64-apple-darwin
+            os: macos-14
+            archive: tar.gz
+          - name: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Package archive
+        shell: bash
+        run: |
+          staging_dir="${BINARY_NAME}-${{ github.ref_name }}-${{ matrix.name }}"
+          mkdir "$staging_dir"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "target/release/${BINARY_NAME}.exe" "$staging_dir/"
+          else
+            cp "target/release/${BINARY_NAME}" "$staging_dir/"
+          fi
+          cp README.md LICENSE "$staging_dir/"
+
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            7z a "$staging_dir.zip" "$staging_dir"
+          else
+            tar -czf "$staging_dir.tar.gz" "$staging_dir"
+          fi
+
+      - name: Upload archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: lazydb-${{ github.ref_name }}-${{ matrix.name }}.${{ matrix.archive }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release archives
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: artifacts
+        run: sha256sum lazydb-* > SHA256SUMS
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: artifacts/*

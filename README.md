@@ -24,6 +24,21 @@ A terminal UI database client for the keyboard-driven developer. Inspired by laz
 
 ## Installation
 
+Install the latest release on Linux or macOS without a Rust toolchain:
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL https://propell.dev/lazydb/install.sh | sh
+```
+
+The installer downloads the matching GitHub Release archive and verifies it
+against that release's `SHA256SUMS` file before installing to `~/.local/bin`.
+
+Prebuilt binaries are available from the [latest GitHub release](https://github.com/niclasgrahm/lazydb/releases/latest)
+for Linux, macOS (Apple Silicon and Intel), and Windows. Verify a downloaded
+archive against the `SHA256SUMS` file included with the release before use.
+
+To build from source:
+
 ```bash
 cargo install --path .
 ```
