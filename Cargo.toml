@@ -10,7 +10,7 @@ color-eyre = "0.6"
 tui-textarea = "0.7"
 serde = { version = "1", features = ["derive"] }
 toml = "1"
-dirs = "6"
+dirs = "7"
 duckdb = { version = "1", features = ["bundled"] }
 postgres = "0.19"
 ureq = "3"
